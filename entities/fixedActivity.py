@@ -1,10 +1,10 @@
-class FixedActivity():
+class fixedActivity():
 
-    def __init__(self, name:str, time_slots:list):
+    def __init__(self, name:str, assigned_ts:list):
         self.__name = name
 
         # This list contains the indexes from the week time slots this activity requires 
-        self.__time_slots = time_slots
+        self.__assigned_ts = assigned_ts
 
     # name
     @property
@@ -17,9 +17,9 @@ class FixedActivity():
 
     # time slots
     @property
-    def time_slots(self):
-        return self.time_slots
+    def assigned_ts(self):
+        return self.__assigned_ts
     
-    @time_slots.setter
-    def time_slots(self, value:list):
-        self.__time_slots = value
+    @assigned_ts.setter
+    def assigned_ts(self, value:list):
+        self.__assigned_ts = value
