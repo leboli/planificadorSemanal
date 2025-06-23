@@ -1,4 +1,3 @@
-
 import tkinter as tk
 from tkinter import ttk, messagebox
 from planner import planner
@@ -6,34 +5,6 @@ from entities.fixedActivity import fixedActivity
 from entities.variableActivity import variableActivity
 from entities.dailyUtility import dailyUtility
 
-"""
-try:
-    from entities import fixedActivity, variableActivity, dailyUtility
-except ImportError:
-    # Stubs if model not available
-    class fixedActivity():
-        def __init__(self, name, assigned_slots):
-            self.name = name
-            self.assigned_ts = assigned_slots
-    class dailyUtility():
-        def __init__(self, segments, utilities_per_segment):
-            self.segments = segments
-            self.utilities_per_segment = utilities_per_segment
-    class variableActivity():
-        def __init__(self, name, min_ts, max_ts, allowed_ts, min_adjacent_ts, max_adjacent_ts):
-            self.name = name
-            self.min_ts = min_ts
-            self.max_ts = max_ts
-            self.allowed_ts = allowed_ts
-            self.min_adjacent_ts = min_adjacent_ts
-            self.max_adjacent_ts = max_adjacent_ts
-            self.utility = {}
-        def set_constant_utility(self, utility):
-            for d in range(1,8):
-                self.utility[d] = dailyUtility([24], [utility])
-        def set_daily_utility(self, day, segments, utils):
-            self.utility[day] = dailyUtility(segments, utils)
-"""
 class PlannerGUI(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -61,6 +32,8 @@ class PlannerGUI(tk.Tk):
                 'advanced': "Configuración avanzada",
                 'const_utility': "Utilidad constante (u):",
                 'penalties': "Penalizaciones (a:val,...):",
+                'window': "Ventana permitida",
+                'days': ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"],
                 'error': "Error",
                 'name_required': "Nombre requerido",
                 'no_solution': "No hay solución óptima.",
@@ -91,6 +64,8 @@ class PlannerGUI(tk.Tk):
                 'advanced': "Advanced settings",
                 'const_utility': "Constant utility (u):",
                 'penalties': "Penalties (a:val,...):",
+                'window': "Allowed window",
+                'days': ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
                 'error': "Error",
                 'name_required': "Name required",
                 'no_solution': "No optimal solution.",
@@ -106,6 +81,7 @@ class PlannerGUI(tk.Tk):
         self.language = tk.StringVar(value='es')
         self.texts = self.languages[self.language.get()]
         self.activities = []
+        self.window_entries = {}  # para almacenar entradas de ventana
 
         # Window config
         self.title(self.texts['title'])
@@ -147,9 +123,7 @@ class PlannerGUI(tk.Tk):
     def set_language(self, lang_code):
         self.texts = self.languages[lang_code]
         self.title(self.texts['title'])
-        # reconstruir toda la interfaz para actualizar textos
-        for w in self.winfo_children():
-            w.destroy()
+        for w in self.winfo_children(): w.destroy()
         self.create_widgets()
 
     def build_left(self):
@@ -182,15 +156,12 @@ class PlannerGUI(tk.Tk):
         self.act_list.bind('<<ListboxSelect>>', self.load_selected)
 
     def build_right(self):
-        # Sección de cálculo y resultados
         ttk.Button(self.right_frame, text=self.texts['calculate'], command=self.calculate).pack(pady=5)
         self.result_text = tk.Text(self.right_frame, height=10)
         self.result_text.pack(fill='both', expand=True, padx=5, pady=5)
 
     def build_form(self, parent):
-        # Campos dinámicos según tipo
-        for w in self.dynamic_frame.winfo_children():
-            w.destroy()
+        for w in self.dynamic_frame.winfo_children(): w.destroy()
 
         if self.type_var.get() == self.texts['fixed']:
             ttk.Label(self.dynamic_frame, text=self.texts['name']).grid(row=0, column=0, sticky='w')
@@ -225,15 +196,49 @@ class PlannerGUI(tk.Tk):
             self.adv_frame.grid(row=6, column=0, columnspan=2, sticky='ew')
 
     def build_advanced(self):
-        # Opciones avanzadas
-        for w in self.adv_frame.winfo_children():
-            w.destroy()
-        if self.adv_var.get():
-            ttk.Label(self.adv_frame, text=self.texts['const_utility']).grid(row=0, column=0, sticky='w')
-            self.const_util = ttk.Entry(self.adv_frame); self.const_util.grid(row=0, column=1, sticky='ew')
+        for w in self.adv_frame.winfo_children(): w.destroy()
+        if not self.adv_var.get():
+            return
+        # Utilidad y penalidades
+        ttk.Label(self.adv_frame, text=self.texts['const_utility']).grid(row=0, column=0, sticky='w')
+        self.const_util = ttk.Entry(self.adv_frame); self.const_util.grid(row=0, column=1, sticky='ew')
 
-            ttk.Label(self.adv_frame, text=self.texts['penalties']).grid(row=1, column=0, sticky='w')
-            self.pens_entry = ttk.Entry(self.adv_frame); self.pens_entry.grid(row=1, column=1, sticky='ew')
+        ttk.Label(self.adv_frame, text=self.texts['penalties']).grid(row=1, column=0, sticky='w')
+        self.pens_entry = ttk.Entry(self.adv_frame); self.pens_entry.grid(row=1, column=1, sticky='ew')
+
+        # Sección de ventana permitida
+        win_frame = ttk.Labelframe(self.adv_frame, text=self.texts['window'])
+        win_frame.grid(row=2, column=0, columnspan=2, pady=5, sticky='ew')
+        self.window_entries.clear()
+        for i, day in enumerate(self.texts['days'], start=1):
+            ttk.Label(win_frame, text=f"{day}:").grid(row=i-1, column=0, sticky='w')
+            entry = ttk.Entry(win_frame)
+            entry.grid(row=i-1, column=1, sticky='ew', padx=2, pady=1)
+            self.window_entries[i] = entry
+
+    def parse_window(self, num_slots):
+        # convierte entradas HH:MM-HH:MM[, ...] por día a lista de índices
+        slots_per_day = num_slots // 7
+        slot_minutes = 7*24*60 // num_slots  # minutos por franja
+        indices = []
+        for day, entry in self.window_entries.items():
+            raw = entry.get().strip()
+            if not raw:
+                continue
+            periods = [p.strip() for p in raw.split(',')]
+            for period in periods:
+                try:
+                    start_s, end_s = period.split('-')
+                    h1, m1 = map(int, start_s.split(':'))
+                    h2, m2 = map(int, end_s.split(':'))
+                except ValueError:
+                    continue
+                start_min = h1*60 + m1
+                end_min = h2*60 + m2
+                start_idx = (day-1)*slots_per_day + start_min // slot_minutes
+                end_idx = (day-1)*slots_per_day + end_min // slot_minutes
+                indices.extend(range(start_idx, end_idx+1))
+        return sorted(set(indices))
 
     def save_activity(self):
         t    = self.type_var.get()
@@ -242,23 +247,22 @@ class PlannerGUI(tk.Tk):
             messagebox.showwarning(self.texts['error'], self.texts['name_required'])
             return
 
-        # Si hay selección, elimino la antigua
         sel = self.act_list.curselection()
         if sel:
             del self.activities[sel[0]]
             self.act_list.delete(sel)
 
-        # Creo la actividad
         if t == self.texts['fixed']:
             slots = [int(x) for x in self.slots_entry.get().split(',') if x.strip().isdigit()]
             act = fixedActivity(name, slots)
         else:
             mn = int(self.min_entry.get() or 0)
-            mx = int(self.max_entry.get() or mn)
+            mx = int(self.max_entry.get() or 700)
             lmin = int(self.lmin_entry.get() or 1)
-            num = {self.texts['168']:168, self.texts['336']:336, self.texts['672']:672}[self.gran_var.get()]
+            num = {'168':168, '336':336, '672':672}[str({'1 hora':168,'30 minutos':336,'15 minutos':672}[self.gran_var.get()])]
             lmax = int(self.lmax_entry.get() or num)
-            window = {}  # implementar ventana completa según necesidad
+            # parse ventana según granularidad
+            window = self.parse_window(num)
             act = variableActivity(name, mn, mx, window, lmin, lmax)
             if self.adv_var.get() and hasattr(self, 'const_util'):
                 u = float(self.const_util.get() or 0)
@@ -279,14 +283,12 @@ class PlannerGUI(tk.Tk):
             return
         act = self.activities[sel[0]]
 
-        # Determino tipo
         if isinstance(act, fixedActivity):
             self.type_var.set(self.texts['fixed'])
         else:
             self.type_var.set(self.texts['variable'])
         self.build_form(None)
 
-        # Cargo valores
         self.name_entry.delete(0,'end'); self.name_entry.insert(0, act.name)
         if isinstance(act, fixedActivity):
             self.slots_entry.delete(0,'end'); self.slots_entry.insert(0, ",".join(map(str, act.assigned_slots)))
@@ -295,11 +297,18 @@ class PlannerGUI(tk.Tk):
             self.max_entry.delete(0,'end'); self.max_entry.insert(0, str(act.weekly_max))
             self.lmin_entry.delete(0,'end'); self.lmin_entry.insert(0, str(act.lmin))
             self.lmax_entry.delete(0,'end'); self.lmax_entry.insert(0, str(act.lmax))
-            self.adv_var.set(bool(act.daily_utilities))
+            self.adv_var.set(bool(act.allowed_ts))
             self.build_advanced()
-            if hasattr(self, 'const_util') and len(act.daily_utilities) == 1:
-                util = act.daily_utilities[1].utilities[0]
-                self.const_util.insert(0, str(util))
+            for d, entry in self.window_entries.items():
+                # reconstruir texto de ventana si existe
+                periods = []
+                for idx in act.allowed_ts:
+                    day = (idx // (num_slots//7)) + 1
+                    if day == d:
+                        slot = idx % (num_slots//7)
+                        periods.append(f"{slot}")
+                entry_text = ",".join(periods)
+                entry.insert(0, entry_text)
 
     def calculate(self):
         num = {'1 hora':168, '30 minutos':336, '15 minutos':672}[self.gran_var.get()]
@@ -320,6 +329,3 @@ class PlannerGUI(tk.Tk):
                 if val:
                     self.result_text.insert('end', f"{name}@{t} | ")
             self.result_text.insert('end', "\n---\n")
-
-
-
