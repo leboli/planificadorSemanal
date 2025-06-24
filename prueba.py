@@ -219,7 +219,7 @@ def open_edit_dialog(e: ft.ControlEvent):
         content=build_activity_form(page,activities[selected_index]),
         actions=[
             ft.TextButton(text=dicts[current_lang]["cancel"], on_click=close_dialog),
-            ft.TextButton(text=dicts[current_lang]["confirm"], on_click=close_dialog),
+            ft.TextButton(text=dicts[current_lang]["confirm"], on_click=confirm_add_edit(dlg,True)),
         ],
     )
     page.open(dlg)
