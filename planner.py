@@ -48,10 +48,10 @@ class planner():
         for index, variable in enumerate(self.variable_activities):
             a_idx = num_fixed + index
             self.model.min_constraints.add(
-                sum(self.model.x[a_idx, t] for t in time_slots) >= variable.min_slots
+                sum(self.model.x[a_idx, t] for t in time_slots) >= variable.min_ts
             )
             self.model.max_constraints.add(
-                sum(self.model.x[a_idx, t] for t in time_slots) <= variable.max_slots
+                sum(self.model.x[a_idx, t] for t in time_slots) <= variable.max_ts
             )
 
         # --- Fragmentation constraints (min/max block size per activity) ---
@@ -64,12 +64,12 @@ class planner():
             max_len = variable.max_adjacent_ts
 
             for t in time_slots:
-                if t + min_len <= self.number_of_ts:
+                if t + min_len - 1 < self.number_of_ts:
                     self.model.fragmentation_restrictions.add(
                         sum(self.model.x[a_idx, t + j] for j in range(min_len)) >=
                         min_len * self.model.start_block[a_idx, t]
                     )
-                if t + max_len <= self.number_of_ts:
+                if t + max_len < self.number_of_ts:
                     self.model.fragmentation_restrictions.add(
                         sum(self.model.x[a_idx, t + j] for j in range(max_len + 1)) <=
                         max_len * self.model.start_block[a_idx, t]
@@ -88,7 +88,7 @@ class planner():
                         )
 
         # --- Auxiliary variables for piecewise utility ---
-        max_segments = max(len(var.utility.utility_segments[d]) for var in self.variable_activities for d in range(7))
+        max_segments = max(len(var.utility.segments) for var in self.variable_activities)
         self.model.h_adk = Var(range(num_variable), range(7), range(max_segments), domain=NonNegativeReals)
 
         # --- Build penalty matrix dynamically ---
@@ -98,7 +98,7 @@ class planner():
             for j, act_j in enumerate(self.variable_activities):
                 b_idx = num_fixed + j
                 if a_idx != b_idx:
-                    value = act_i.penalty.get(act_j.name, 0)
+                    value = act_i.penalties.get(act_j.name, 0)
                     penalties[(a_idx, b_idx)] = value
 
         # --- Objective function: maximize utility - transition penalty ---
@@ -108,7 +108,7 @@ class planner():
 
             for a_idx, var_act in enumerate(self.variable_activities):
                 for d in range(7):
-                    segments = var_act.utility.utility_segments[d]
+                    segments = var_act.utility.segments[d]
                     for k, (start, end, util) in enumerate(segments):
                         total_utility += util * m.h_adk[a_idx, d, k]
 
