@@ -1,101 +1,82 @@
-from entities import fixedActivity
-from entities import dailyUtility
-from entities import variableActivity
-
 from pyomo.environ import *
 
 class planner():
-
-    def __init__(self, fixed_activities:list, variable_activities:list, number_of_ts:int):
-
-        self.fixed_activities = fixed_activities
-        self.variable_activities = variable_activities
-        self.number_of_ts = number_of_ts
+    def __init__(self, fixed_activities, variable_activities, number_of_ts):
+        self.fixed_activities = fixed_activities  # list of fixedActivity
+        self.variable_activities = variable_activities  # list of variableActivity
+        self.number_of_ts = number_of_ts  # total number of time slots in the schedule (e.g., 168 = 1 week in hours)
         self.model = ConcreteModel()
-
-
 
     def buildModel(self):
-        print("Build model called.")
+        print("Building model...")
 
-        # Create the concrete Pyomo model
         self.model = ConcreteModel()
 
-        # Number of fixed and variable activities
+        # Sets: total activities and time slots
         num_fixed = len(self.fixed_activities)
         num_variable = len(self.variable_activities)
         total_activities = num_fixed + num_variable
+        time_slots = range(self.number_of_ts)
 
-        activities = list(range(total_activities))  # IDs 0 to total_activities - 1
-        time_slots = list(range(self.number_of_ts))  # Time slots (e.g. 0 to 167 for 168 hours)
-
-        # Define sets in the model
-        self.model.activities = Set(initialize=activities)
+        self.model.activities = Set(initialize=range(total_activities))
         self.model.time_slots = Set(initialize=time_slots)
 
-        # Decision variable: x[a, t] = 1 if activity 'a' is assigned to time slot 't'
+        # Binary variable x[a, t]: 1 if activity a is assigned to time slot t
         self.model.x = Var(self.model.activities, self.model.time_slots, domain=Binary)
 
-        # Fix x[a, t] = 1 for time slots assigned to fixed activities
-        for index, fixed_activity in enumerate(self.fixed_activities):
-            for t in fixed_activity.assigned_ts:
+        # --- Fix assignment for fixed activities ---
+        for index, fixed in enumerate(self.fixed_activities):
+            for t in fixed.assigned_ts:
                 self.model.x[index, t].fix(1)
 
-        # Fix x[a, t] = 0 for time slots not allowed for variable activities
-        var_offset = num_fixed
-        for index, variable_activity in enumerate(self.variable_activities):
+        # --- Prevent variable activities from being scheduled in disallowed slots ---
+        for index, variable in enumerate(self.variable_activities):
+            var_idx = num_fixed + index
             for t in time_slots:
-                if t not in variable_activity.allowed_ts:
-                    self.model.x[var_offset + index, t].fix(0)
+                if t not in variable.allowed_ts:
+                    self.model.x[var_idx, t].fix(0)
 
-        # Restriction: Only one activity can be assigned to each time slot
-        def one_activity_per_slot_rule(model, t):
-            return sum(model.x[a, t] for a in model.activities) <= 1
+        # --- Constraint: at most one activity per time slot ---
+        def one_per_slot_rule(m, t):
+            return sum(m.x[a, t] for a in m.activities) <= 1
+        self.model.one_activity_per_slot = Constraint(self.model.time_slots, rule=one_per_slot_rule)
 
-        self.model.one_activity_per_slot = Constraint(self.model.time_slots, rule=one_activity_per_slot_rule)
+        # --- Min/Max time slots per variable activity ---
+        self.model.min_constraints = ConstraintList()
+        self.model.max_constraints = ConstraintList()
 
-        # ConstraintList is needed to dynamically add min/max slot constraints
-        self.model.restricciones_min = ConstraintList()
-        self.model.restricciones_max = ConstraintList()
-
-        # Min/max number of slots assigned to each variable activity
-        for index, variable_activity in enumerate(self.variable_activities):
-            a_idx = var_offset + index
-            self.model.restricciones_min.add(
-                sum(self.model.x[a_idx, t] for t in time_slots) >= variable_activity.min_slots
+        for index, variable in enumerate(self.variable_activities):
+            a_idx = num_fixed + index
+            self.model.min_constraints.add(
+                sum(self.model.x[a_idx, t] for t in time_slots) >= variable.min_slots
             )
-            self.model.restricciones_max.add(
-                sum(self.model.x[a_idx, t] for t in time_slots) <= variable_activity.max_slots
+            self.model.max_constraints.add(
+                sum(self.model.x[a_idx, t] for t in time_slots) <= variable.max_slots
             )
 
-        # Auxiliary variables: h_adk[a, d, k] is the amount of time assigned to activity 'a'
-        # on day 'd', in segment 'k' of the utility function
-        self.model.h_adk = Var(
-            range(num_variable),      # Index of variable activities
-            range(7),                 # Days of the week (0 = Monday)
-            range(self.max_segments), # Max number of segments across all activities
-            domain=NonNegativeReals
-        )
+        # --- Fragmentation constraints (min/max block size per activity) ---
+        self.model.fragmentation_restrictions = ConstraintList()
+        self.model.start_block = Var(self.model.activities, self.model.time_slots, domain=Binary)
 
-        for a_idx, variable_activity in enumerate(self.variable_activities):
-            global_idx = len(self.fixed_activities) + a_idx
-            min_len = variable_activity.min_block_len
-            max_len = variable_activity.max_block_len
+        for index, variable in enumerate(self.variable_activities):
+            a_idx = num_fixed + index
+            min_len = variable.min_adjacent_ts
+            max_len = variable.max_adjacent_ts
 
-            for t in range(self.number_of_ts):
+            for t in time_slots:
                 if t + min_len <= self.number_of_ts:
                     self.model.fragmentation_restrictions.add(
-                        sum(self.model.x[global_idx, t + j] for j in range(min_len)) >=
-                        min_len * self.model.start_block[global_idx, t]
+                        sum(self.model.x[a_idx, t + j] for j in range(min_len)) >=
+                        min_len * self.model.start_block[a_idx, t]
                     )
                 if t + max_len <= self.number_of_ts:
                     self.model.fragmentation_restrictions.add(
-                        sum(self.model.x[global_idx, t + j] for j in range(max_len + 1)) <=
-                        max_len * self.model.start_block[global_idx, t]
+                        sum(self.model.x[a_idx, t + j] for j in range(max_len + 1)) <=
+                        max_len * self.model.start_block[a_idx, t]
                     )
-            
-        self.model.transition = Var(self.model.activities, self.model.activities, self.model.time_slots, domain=Binary)
 
+        # --- Transition variables (to model penalties between activities) ---
+        self.model.transition = Var(self.model.activities, self.model.activities, self.model.time_slots, domain=Binary)
         self.model.transition_def = ConstraintList()
 
         for t in range(1, self.number_of_ts):
@@ -105,36 +86,41 @@ class planner():
                         self.model.transition_def.add(
                             self.model.transition[a, b, t] >= self.model.x[a, t-1] + self.model.x[b, t] - 1
                         )
-        
-        # Objective function: maximize total utility based on piecewise utility segments
-        def objective_rule(model):
+
+        # --- Auxiliary variables for piecewise utility ---
+        max_segments = max(len(var.utility.utility_segments[d]) for var in self.variable_activities for d in range(7))
+        self.model.h_adk = Var(range(num_variable), range(7), range(max_segments), domain=NonNegativeReals)
+
+        # --- Build penalty matrix dynamically ---
+        penalties = dict()
+        for i, act_i in enumerate(self.variable_activities):
+            a_idx = num_fixed + i
+            for j, act_j in enumerate(self.variable_activities):
+                b_idx = num_fixed + j
+                if a_idx != b_idx:
+                    value = act_i.penalty.get(act_j.name, 0)
+                    penalties[(a_idx, b_idx)] = value
+
+        # --- Objective function: maximize utility - transition penalty ---
+        def objective_rule(m):
             total_utility = 0
             total_penalty = 0
 
-            for a_idx, variable_activity in enumerate(self.variable_activities):
+            for a_idx, var_act in enumerate(self.variable_activities):
                 for d in range(7):
-                    segments = variable_activity.utility_segments[d]
+                    segments = var_act.utility.utility_segments[d]
                     for k, (start, end, util) in enumerate(segments):
-                        h_adk = model.h_adk[a_idx, d, k]
-                        total_utility += util * h_adk
+                        total_utility += util * m.h_adk[a_idx, d, k]
 
-            for a in model.activities:
-                for b in model.activities:
-                    if a != b:
-                        for t in model.time_slots:
-                            if (a, b) in self.penalties:
-                                total_penalty += self.penalties[(a, b)] * model.transition[a, b, t]
+            for (a, b), penalty_val in penalties.items():
+                for t in m.time_slots:
+                    total_penalty += penalty_val * m.transition[a, b, t]
 
             return total_utility - total_penalty
 
         self.model.obj = Objective(rule=objective_rule, sense=maximize)
 
-
-
-
-
-        
-    def solve():
-
-        print("solve called.")
-        return (123.45,{(1,30):1}) #(utility, dict of all x_{a,t})
+    def solve(self):
+        print("Solving...")
+        # Dummy solve output: Replace with actual solver logic
+        return (123.45, {(1, 30): 1})
