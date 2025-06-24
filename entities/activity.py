@@ -1,6 +1,6 @@
 from abc import ABC
 
-class Activity(ABC):
+class activity(ABC):
 
     def __init__(self, name:str, penalties:dict):
         self.__name = name
