@@ -67,7 +67,57 @@ dicts = {
 # Global state
 current_lang = "en"
 number_of_ts = 168
-activities: list = [variableActivity("aaaaa",[dailyUtility([1,24],[3,6]),dailyUtility([5,7,24],[1,0,8])],0,700,[i for i in range(1,169)],1,45,{}),variableActivity("bbbbbbb",0,0,700,[i for i in range(1,169)],1,45,{}),fixedActivity("fixeeed",[i for i in range(1,31)],{})]
+Test = True
+if Test:
+    fac1 = fixedActivity("fac1", [1, 24, 48], {})
+    fac2 = fixedActivity("fac2", list(range(1, 169)), {fac1: "5"})
+    fac3 = fixedActivity("fac3", [], {})
+    vac1 = variableActivity(
+        "vac1",
+        [dailyUtility([1, 24], [3, 6]) for _ in range(7)],
+        5, 20,
+        list(range(1, 169)),
+        1, 10,
+        {}
+    )
+    vac2 = variableActivity(
+        "vac2",
+        [dailyUtility([], []) for _ in range(7)],
+        0, 0,
+        [],
+        0, 0,
+        {}
+    )
+    vac3 = variableActivity(
+        "vac3",
+        [
+            dailyUtility([10, 15, 20], [100, 50, 0]) if day < 3
+            else dailyUtility([5, 10], [20, 10])
+            for day in range(7)
+        ],
+        12, 36,
+        [2, 3, 4, 10, 11, 12, 50],
+        2, 8,
+        {fac1: "2", fac2: "10"}
+    )
+    vac4 = variableActivity(
+        "vac4_invalid",
+        [dailyUtility([], []) for _ in range(7)],
+        50, 10,
+        [1, 2, 3],
+        1, 2,
+        {}
+    )
+    vac5 = variableActivity(
+        "vac5_fragmented",
+        [dailyUtility([5], [25]) for _ in range(7)],
+        10, 10,
+        [i for i in range(1, 169) if i % 10 == 0],
+        1, 1,
+        {}
+    )
+
+activities: list = [fac1,fac2,fac3,vac1,vac2,vac3,vac4,vac5] if Test else []
 selected_index: int = -1
 daydic = {1:"mon", 2:"tue", 3:"wed", 4:"thu", 5:"fri", 6:"sat", 7:"sun"} if current_lang=="en" else {1:"lun", 2:"mar", 3:"mié", 4:"jue", 5:"vie", 6:"sáb", 7:"dom"}
 
@@ -243,32 +293,52 @@ def build_activity_info(act):
     typ = "Fixed" if isinstance(act, fixedActivity) else "Variable"
     info.append(ft.Text(f"Type: {typ}"))
 
+    def daydic_to_strarray(dic,minus_one=False):
+        print("=================================================" \
+        +str(dic)+
+        "================================================")
+        return [
+            f"{daydic[d].capitalize()}: {dic[d-1] if minus_one else (dic[daydic[d].capitalize()] if daydic[d].capitalize() in dic else None)}"
+            for d in range(1, len(dic)+1)
+        ]
+
+
     if isinstance(act, fixedActivity):
         sched = inverse_parse_window(act.assigned_ts, number_of_ts)
-        info.append(ft.Text(f"Assigned schedule: {sched}"))
-        
+        schedule_str = "\n".join(
+            daydic_to_strarray(sched)
+        )
+        info.append(
+            ft.Text(f"Assigned schedule:\n{schedule_str}")
+        )        
     else:
         info.append(ft.Text(f"Min weekly: {act.min_ts}"))
         info.append(ft.Text(f"Max weekly: {act.max_ts}"))
         info.append(ft.Text(f"Min adjacent: {act.min_adjacent_ts}"))
         info.append(ft.Text(f"Max adjacent: {act.max_adjacent_ts}"))
 
-        info.append(ft.Text(f"Allowed window: {inverse_parse_window(act.allowed_ts,number_of_ts)}"))
-        
+        allowed_str = "\n".join(
+            daydic_to_strarray(
+                inverse_parse_window(act.allowed_ts, number_of_ts)
+            )
+        )
+        info.append(
+            ft.Text(f"Allowed window:\n{allowed_str}")
+        )        
+        utility_str = "\n".join(
+            daydic_to_strarray(act.utility,minus_one=True)
+        )
+        info.append(
+            ft.Text(f"Utility:\n{utility_str}")
+        )        
 
-        util_parts = [
-            f"{daydic[d].capitalize()}: {act.utility[d-1]}"
-            for d in range(1, len(act.utility)+1)
-        ]
-        util_str = "; ".join(util_parts)
-        info.append(ft.Text(f"Utility:\n {util_str}"))
-        
-
-    # Penalties (shared by both types)
+    # Penalties
     if getattr(act, "penalties", None):
-        info.append(ft.Text("Penalties:"))
-        """for other_act, val in act.penalties.items():
-            info.append(ft.Text(f"  {other_act.name}: {val}"))"""
+        info.append(ft.Text("Penalties:\n"))
+        for a in act.penalties:
+            info.append(ft.Text(f"{(a.name+': '+act.penalties[a])}"))
+            info.append(ft.Text("\n"))
+
 
     return info
 
@@ -405,7 +475,7 @@ def build_activity_form(page, act=None):
     init_adj_min = 1 if not act or isinstance(act, fixedActivity) else act.min_adjacent_ts
     init_adj_max = number_of_ts if not act or isinstance(act, fixedActivity) else act.max_adjacent_ts
     init_util    = act.utility if act and hasattr(act, "utility") else []
-    init_win     = act.allowed_ts if act and hasattr(act, "allowed_ts") else {}
+    init_win     = inverse_parse_window(act.allowed_ts,number_of_ts) if act and hasattr(act, "allowed_ts") else {}
 
     # --- 2) Build all form controls ---
     type_dd      = ft.Dropdown(
@@ -678,7 +748,7 @@ def confirm_add_edit(dlg: ft.AlertDialog, edit=False):
         min_adj = int(f["var_adj_min"].value)
         max_adj = int(f["var_adj_max"].value)
         penalties = {a: float(f["penalties_var"][a].value) for a in f["penalties_var"] if f["penalties_var"][a].value.strip()}
-        win = {d: f["win_fields"][d].value for d in f["win_fields"]}
+        win = parse_window(number_of_ts,f["win_fields"])
         if util_cte!=0:
             cteUtil = {day:dailyUtility([number_of_ts/7],[util_cte]) for day in range(1,8)} 
             new_act = variableActivity(name,cteUtil, min_ts, max_ts,win, min_adj, max_adj, penalties)
