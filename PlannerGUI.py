@@ -2,6 +2,8 @@ import flet as ft
 from entities.fixedActivity import fixedActivity
 from entities.variableActivity import variableActivity
 from entities.dailyUtility import dailyUtility
+from planner import planner
+from ast import literal_eval
 
 # Translation dictionaries
 dicts = {
@@ -19,7 +21,7 @@ dicts = {
         "fixed": "fixed",
         "variable": "variable",
         "name": "Name",
-        "assigned_schedule": "Assigned schedule as HH:MM-hh:mm,[HH:MM-hh:mm,...] in 24hr format",
+        "assigned_schedule": "Assigned schedule (as HH:MM-hh:mm,[HH:MM-hh:mm,...] in 24hr format)",
         "advanced_options": "Advanced options",
         "penalties": "Penalties",
         "min_weekly_ts": "Min weekly time units",
@@ -28,7 +30,7 @@ dicts = {
         "min_adj": "Min adjacent time units",
         "max_adj": "Max adjacent time units",
         "configure_pw_util": "Configure piecewise daily utility",
-        "allowed_window": "Allowed window as HH:MM-hh:mm,[HH:MM-hh:mm,...] in 24hr format",
+        "allowed_window": "Allowed window (as HH:MM-hh:mm,[HH:MM-hh:mm,...] in 24hr format)",
         "confirm": "Confirm",
         "cancel": "Cancel",
     },
@@ -46,7 +48,7 @@ dicts = {
         "fixed": "fija",
         "variable": "variable",
         "name": "Nombre",
-        "assigned_schedule": "Horario asignado como HH:MM-hh:mm,[HH:MM-hh:mm,...] en formato 24hrs",
+        "assigned_schedule": "Horario asignado (como HH:MM-hh:mm,[HH:MM-hh:mm,...] en formato 24hrs)",
         "advanced_options": "Opciones avanzadas",
         "penalties": "Penalizaciones",
         "min_weekly_ts": "Mín unidades de tiempo semanales",
@@ -55,19 +57,19 @@ dicts = {
         "min_adj": "Mín unidades de tiempo adyacentes",
         "max_adj": "Máx unidades de tiempo adyacentes",
         "configure_pw_util": "Configurar utilidad diaria por partes",
-        "allowed_window": "Ventana permitida como HH:MM-hh:mm,[HH:MM-hh:mm,...] en formato 24hrs",
+        "allowed_window": "Ventana permitida (como HH:MM-hh:mm,[HH:MM-hh:mm,...] en formato 24hrs)",
         "confirm": "Confirmar",
         "cancel": "Cancelar",
     }
 }
-daydic = {1:"mon", 2:"tue", 3:"wed", 4:"thu", 5:"fri", 6:"sat", 7:"sun"}
 
 
 # Global state
 current_lang = "en"
 number_of_ts = 168
-activities: list = [variableActivity("aaaaa",0,0,700,[range(168)],1,45,{}),variableActivity("bbbbbbb",0,0,700,[range(168)],1,45,{}),fixedActivity("fixeeed",{},[range(31)])]
+activities: list = [variableActivity("aaaaa",[dailyUtility([1,24],[3,6]),dailyUtility([5,7,24],[1,0,8])],0,700,[i for i in range(1,169)],1,45,{}),variableActivity("bbbbbbb",0,0,700,[i for i in range(1,169)],1,45,{}),fixedActivity("fixeeed",[i for i in range(1,31)],{})]
 selected_index: int = -1
+daydic = {1:"mon", 2:"tue", 3:"wed", 4:"thu", 5:"fri", 6:"sat", 7:"sun"} if current_lang=="en" else {1:"lun", 2:"mar", 3:"mié", 4:"jue", 5:"vie", 6:"sáb", 7:"dom"}
 
 # UI references for enabling/disabling
 lang_dd = None
@@ -78,22 +80,23 @@ edit_btn = None
 solve_btn = None
 
 
-def main(page: ft.Page):
+# ─────────────────────────────────────────────────────────────────────────────
+def GUI(page: ft.Page):
     global lang_dd, tu_dd, activities_table, add_btn, edit_btn, solve_btn
-    page.title = "Scheduler"
-    page.vertical_alignment = ft.MainAxisAlignment.START
-    page.window_width = 1000
-    page.window_height = 700
 
-    # Language dropdown
+    page.title = "Scheduler"
+    page.window_width = 1200
+    page.window_height = 800
+    page.scroll = ft.ScrollMode.ADAPTIVE
+    page._form_inputs = {}
+
+    # --- Top controls --------------------------------------------------------
     lang_dd = ft.Dropdown(
         options=[ft.dropdown.Option("en"), ft.dropdown.Option("es")],
         value=current_lang,
         on_change=on_language_change,
         alignment=ft.alignment.top_right,
     )
-
-    # Time unit dropdown
     tu_dd = ft.Dropdown(
         options=[
             ft.dropdown.Option(dicts[current_lang]["one_hour"]),
@@ -104,62 +107,85 @@ def main(page: ft.Page):
         on_change=on_time_unit_change,
         alignment=ft.alignment.top_left,
     )
+    top_row = ft.Row([tu_dd, ft.Container(expand=1), lang_dd], height=50)
 
-    # Top rows
-    top_row = ft.Row([
-        tu_dd,
-        ft.Container(expand=1),
-        lang_dd,
-    ], height=50)
-
-    # Activities panel
-    activities_table = ft.DataTable(columns=[ft.DataColumn(ft.Text(dicts[current_lang]["name"]))], rows=[], width=580)
-    refresh_activities(page=page)
+    # --- Activities table ---------------------------------------------------
+    activities_table = ft.DataTable(
+        columns=[
+            ft.DataColumn(ft.Text(dicts[current_lang]["name"],size=15)),
+            ft.DataColumn(ft.Text(dicts[current_lang]["type"],size=15))
+        ],
+        rows=[],
+        width=400,
+    )
+    refresh_activities(page)
 
     add_btn = ft.ElevatedButton(dicts[current_lang]["add"], on_click=open_add_dialog)
     edit_btn = ft.ElevatedButton(dicts[current_lang]["edit"], on_click=open_edit_dialog, disabled=True)
-    solve_btn = ft.ElevatedButton(dicts[current_lang]["solve"], on_click=lambda e: print("solving"), bgcolor=ft.Colors.PINK_ACCENT_200, width=620)
-
-    activities_column = ft.Column(
-        [
-            ft.Text(dicts[current_lang]["activities"]),
-            ft.Container(
-                content=activities_table,
-                height=400,
-                bgcolor=ft.Colors.GREY_700,
-                padding=5,
-            ),
-            ft.Row([add_btn, edit_btn]),
-        ],
-        width=600, scroll="auto"
+    solve_btn = ft.ElevatedButton(
+        dicts[current_lang]["solve"],
+        on_click=lambda e: print("solving"),
+        bgcolor=ft.Colors.PINK_ACCENT_200,
+        expand=True
     )
-    activities_panel = ft.Container(
-        content=activities_column,
+
+    # --- Info panel (new!) --------------------------------------------------
+    selected_info_panel = ft.Column([], visible=False, scroll="auto",expand=True)
+
+    # --- Left column: activities + info -------------------------------------
+    activities_column = ft.Column([
+        ft.Row([
+        ft.Container(
+            content=ft.Text(dicts[current_lang]["activities"],
+                            size=20, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.BOLD),
+            expand=True
+        )]),
+        ft.Row([ft.Container(
+            content=ft.Column([activities_table], scroll="auto", expand=True),
+            height=400,
+            bgcolor=ft.Colors.GREY_700,
+            padding=5,
+            border_radius=10, 
+            expand=True,
+        )]),
+        ft.Row([add_btn, edit_btn]),
+    ], expand=True)
+
+    activities_panel = ft.Row([ft.Container(
+        content=ft.Row([activities_column]),
         bgcolor=ft.Colors.GREY_900,
-        padding=10,
-        expand=False,
-        height=500
-    )
+        padding=20,
+        expand=True,
+        border_radius=10, border=ft.border.all(3, ft.Colors.INDIGO_700)
+    )])
 
-    # Right panel placeholder
     right_panel = ft.Container(expand=1)
 
-    # Layout
+    # --- Assemble page ------------------------------------------------------
     body = ft.Column([
         top_row,
-        ft.Row([ft.Column([activities_panel, solve_btn]), right_panel], expand=True),
+        ft.Row([
+            ft.Column([activities_panel, 
+                        ft.Row([ft.Container(content=solve_btn, expand=True)]),
+                        ft.Row([ft.Container(selected_info_panel, margin=ft.margin.only(top=10), padding=5,border=ft.border.all(1, ft.Colors.BLUE_200), border_radius=5,expand=True)])],
+                        width=400),
+            right_panel
+        ], expand=True),
     ], expand=True)
+
+    page.selected_info_panel = selected_info_panel
 
     page.add(body)
 
-
+# ─────────────────────────────────────────────────────────────────────────────
 def on_language_change(e: ft.ControlEvent):
     global current_lang
+    global daydic
     current_lang = e.control.value
+    daydic = {1:"mon", 2:"tue", 3:"wed", 4:"thu", 5:"fri", 6:"sat", 7:"sun"} if current_lang=="en" else {1:"lun", 2:"mar", 3:"mié", 4:"jue", 5:"vie", 6:"sáb", 7:"dom"}
     e.page.controls.clear()
-    main(e.page)
+    GUI(e.page)
     e.page.update()
-
 
 def on_time_unit_change(e: ft.ControlEvent):
     global number_of_ts
@@ -172,56 +198,119 @@ def on_time_unit_change(e: ft.ControlEvent):
         number_of_ts = 672
     e.page.update()
 
-
+# ─────────────────────────────────────────────────────────────────────────────
 def refresh_activities(page):
     global activities_table
     activities_table.rows.clear()
     for idx, act in enumerate(activities):
         activities_table.rows.append(
             ft.DataRow(
-                cells=[ft.DataCell(ft.Text(act.name))],
-                on_select_changed=lambda e, i=idx: select_activity(i,page),
+                cells=[
+                    ft.DataCell(ft.Text(act.name)),
+                    ft.DataCell(ft.Text(dicts[current_lang][
+                        "fixed" if isinstance(act, fixedActivity) else "variable"
+                    ]))
+                ],
                 selected=False,
+                on_select_changed=lambda e, i=idx: select_activity(i, page)
             )
         )
+    page.update()
 
-
-def select_activity(index: int, page):
-    global selected_index
+def select_activity(index: int, page: ft.Page):
+    global selected_index, edit_btn
     selected_index = index
     edit_btn.disabled = False
+
+    # toggle row highlighting
     for i, row in enumerate(activities_table.rows):
         row.selected = (i == index)
+
+    # build & show the info panel
+    act = activities[index]
+    fields = build_activity_info(act)
+    panel: ft.Column = page.selected_info_panel
+    panel.controls = fields
+    panel.visible = True
+
     page.update()
+
+# ─────────────────────────────────────────────────────────────────────────────
+def build_activity_info(act):
+    """Turn a fixedActivity or variableActivity into a list of Text controls."""
+    info = []
+    info.append(ft.Text(f"Name: {act.name}", weight=ft.FontWeight.BOLD))
+    typ = "Fixed" if isinstance(act, fixedActivity) else "Variable"
+    info.append(ft.Text(f"Type: {typ}"))
+
+    if isinstance(act, fixedActivity):
+        sched = inverse_parse_window(act.assigned_ts, number_of_ts)
+        info.append(ft.Text(f"Assigned schedule: {sched}"))
+        
+    else:
+        info.append(ft.Text(f"Min weekly: {act.min_ts}"))
+        info.append(ft.Text(f"Max weekly: {act.max_ts}"))
+        info.append(ft.Text(f"Min adjacent: {act.min_adjacent_ts}"))
+        info.append(ft.Text(f"Max adjacent: {act.max_adjacent_ts}"))
+
+        info.append(ft.Text(f"Allowed window: {inverse_parse_window(act.allowed_ts,number_of_ts)}"))
+        
+
+        util_parts = [
+            f"{daydic[d].capitalize()}: {act.utility[d-1]}"
+            for d in range(1, len(act.utility)+1)
+        ]
+        util_str = "; ".join(util_parts)
+        info.append(ft.Text(f"Utility:\n {util_str}"))
+        
+
+    # Penalties (shared by both types)
+    if getattr(act, "penalties", None):
+        info.append(ft.Text("Penalties:"))
+        """for other_act, val in act.penalties.items():
+            info.append(ft.Text(f"  {other_act.name}: {val}"))"""
+
+    return info
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def open_add_dialog(e: ft.ControlEvent):
     page = e.page
-    def on_confirm(e): confirm_add_edit(dlg)
+    form_stack, controls = build_activity_form(page, None)
+
     dlg = ft.AlertDialog(
         modal=True,
         title=ft.Text(f"{dicts[current_lang]['add']} Activity"),
-        content=ft.Container(build_activity_form(page, None, confirm_btn_ref := [], cancel_btn_ref := []), width=600),
+        content=ft.Container(form_stack, width=600),
         actions=[
-            ft.TextButton(text=dicts[current_lang]["cancel"], on_click=close_dialog, ref=cancel_btn_ref),
-            ft.TextButton(text=dicts[current_lang]["confirm"], on_click=on_confirm, ref=confirm_btn_ref),
-        ],
+            ft.TextButton(dicts[current_lang]["cancel"], on_click=close_dialog),
+            ft.TextButton(dicts[current_lang]["confirm"], on_click=lambda ev: confirm_add_edit(dlg)),
+        ]
     )
+    # add dialog action buttons to controls list
+    controls.extend(dlg.actions)
+
     page.dialog = dlg
     page.open(dlg)
     page.update()
 
 def open_edit_dialog(e: ft.ControlEvent):
     page = e.page
+    form_stack, controls = build_activity_form(page, activities[selected_index])
+
     dlg = ft.AlertDialog(
         modal=True,
         title=ft.Text(f"{dicts[current_lang]['edit']} Activity"),
-        content=build_activity_form(page,activities[selected_index]),
+        content=ft.Container(form_stack, width=600),
         actions=[
-            ft.TextButton(text=dicts[current_lang]["cancel"], on_click=close_dialog),
-            ft.TextButton(text=dicts[current_lang]["confirm"], on_click=confirm_add_edit(dlg,True)),
-        ],
+            ft.TextButton(dicts[current_lang]["cancel"], on_click=close_dialog),
+            ft.TextButton(dicts[current_lang]["confirm"], on_click=lambda ev: confirm_add_edit(dlg, True)),
+        ]
     )
+    controls.extend(dlg.actions)
+
+    page.dialog = dlg
     page.open(dlg)
     page.update()
 
@@ -232,7 +321,7 @@ def close_dialog(e: ft.ControlEvent):
     page.update()
 
 
-def parse_window(self, num_slots, entries_dict):
+def parse_window(num_slots, entries_dict):
         slots_per_day = num_slots // 7
         slot_minutes = (7*24*60) // num_slots
         idxs = []
@@ -254,144 +343,308 @@ def parse_window(self, num_slots, entries_dict):
 
 def inverse_parse_window(indices, num_slots):
     slots_per_day = num_slots // 7
-    minutes_per_slot = (7 * 24 * 60) // num_slots  # duración de cada franja en minutos
-    result = {day: [] for day in range(1, 8)}  # 1=Lunes ... 7=Domingo
+    minutes_per_slot = (24 * 60) // slots_per_day  # minutes per slot
 
-    for idx in indices:
-        day = (idx // slots_per_day) + 1
-        slot = idx % slots_per_day
-        total_minutes = slot * minutes_per_slot
-        hour = total_minutes // 60
-        minute = total_minutes % 60
-        result[day].append(f"{hour:02d}:{minute:02d}")
+    # Bucket indices by day
+    days = {d: [] for d in range(1, 8)}
+    for idx in sorted(indices):
+        if 1 <= idx <= num_slots:
+            day = (idx - 1) // slots_per_day + 1
+            days[day].append(idx)
 
-    return result
+    def slot_to_minutes_in_day(slot_idx):
+        # slot position within its day (0-based)
+        slot_in_day = (slot_idx - 1) % slots_per_day
+        start_min = slot_in_day * minutes_per_slot
+        end_min = start_min + minutes_per_slot - 1
+        return start_min, end_min
+
+    def minutes_to_str(m):
+        h, mm = divmod(m, 60)
+        return f"{h:02d}:{mm:02d}"
+
+    schedule = {}
+    for day, idxs in days.items():
+        if not idxs:
+            continue
+        # Group into contiguous runs
+        runs = []
+        run_start = prev = idxs[0]
+        for curr in idxs[1:]:
+            if curr == prev + 1:
+                prev = curr
+            else:
+                runs.append((run_start, prev))
+                run_start = prev = curr
+        runs.append((run_start, prev))
+
+        # Format each run into "HH:MM-HH:MM"
+        parts = []
+        for s, e in runs:
+            s_min, _ = slot_to_minutes_in_day(s)
+            _, e_min = slot_to_minutes_in_day(e)
+            parts.append(f"{minutes_to_str(s_min)}-{minutes_to_str(e_min)}")
+
+        schedule[daydic[day].capitalize()] = ",".join(parts)
+
+    return schedule
 
 
 
-def build_activity_form(page, act=None, confirm_btn_ref=None, cancel_btn_ref=None):
-    from entities.dailyUtility import dailyUtility
 
-    init_type = "fixed" if not act or isinstance(act, fixedActivity) else "variable"
-    init_name = act.name if act else ""
-    init_schedules = {} if not act or isinstance(act, variableActivity) else inverse_parse_window(act.assigned_ts)
-    init_penalties = act.penalties.copy() if act else {}
-    init_min_ts = 0 if not act or isinstance(act, fixedActivity) else act.min_ts
-    init_max_ts = number_of_ts if not act or isinstance(act, fixedActivity) else act.max_ts
-    init_util_cte = act.util_cte if act and hasattr(act, "util_cte") else 0
-    init_min_adj = 1 if not act or isinstance(act, fixedActivity) else act.min_adjacent_ts
-    init_max_adj = number_of_ts if not act or isinstance(act, fixedActivity) else act.max_adjacent_ts
-    util = act.utility if act and hasattr(act, "utility") else {}
-    init_window = act.allowed_ts if act and hasattr(act, "allowed_ts") else {}
 
-    segment_inputs = {}
-    utility_inputs = {}
+def build_activity_form(page, act=None):
+    # --- 1) Compute initial values ---
+    init_type    = "fixed" if not act or isinstance(act, fixedActivity) else "variable"
+    init_name    = act.name if act else ""
+    init_sched   = {} if not act or isinstance(act, variableActivity) else inverse_parse_window(act.assigned_ts, number_of_ts)
+    init_pen     = act.penalties.copy() if act else {}
+    init_min     = 0 if not act or isinstance(act, fixedActivity) else act.min_ts
+    init_max     = number_of_ts if not act or isinstance(act, fixedActivity) else act.max_ts
+    init_util_cte= act.util_cte if act and hasattr(act, "util_cte") else 0
+    init_adj_min = 1 if not act or isinstance(act, fixedActivity) else act.min_adjacent_ts
+    init_adj_max = number_of_ts if not act or isinstance(act, fixedActivity) else act.max_adjacent_ts
+    init_util    = act.utility if act and hasattr(act, "utility") else []
+    init_win     = act.allowed_ts if act and hasattr(act, "allowed_ts") else {}
 
-    def close_pw_panel(e=None):
-        pw_panel.visible = False
-        if confirm_btn_ref: confirm_btn_ref[0].disabled = False
-        if cancel_btn_ref: cancel_btn_ref[0].disabled = False
-        page.update()
-
-    def confirm_pw_panel(e=None):
-        try:
-            new_util = {}
-            for day in range(1, 8):
-                seg_str = segment_inputs[day].value.strip()
-                util_str = utility_inputs[day].value.strip()
-                segments = [int(x.strip()) for x in seg_str.split(",") if x.strip()]
-                utilities = [float(x.strip()) for x in util_str.split(",") if x.strip()]
-                if len(segments) + 1 != len(utilities):
-                    raise ValueError(f"Day {day}: mismatch between segments and utilities.")
-                new_util[day] = dailyUtility(segments, utilities)
-            nonlocal util
-            util = new_util
-            close_pw_panel()
-        except Exception as err:
-            page.dialog = ft.AlertDialog(title=ft.Text(str(err)))
-            page.dialog.open = True
-            page.update()
-
-    pw_rows = []
-    for day in range(1, 8):
-        seg_tf = ft.TextField(label="Segment ends (e.g. 3,5,8)")
-        util_tf = ft.TextField(label="Corresponding utilities (e.g. 2,4,1)")
-        segment_inputs[day] = seg_tf
-        utility_inputs[day] = util_tf
-        pw_rows.append(ft.Column([ft.Text(daydic[day].capitalize(), weight="bold"), seg_tf, util_tf], spacing=5))
-
-    pw_panel = ft.Container(
-        visible=False, padding=20, alignment=ft.alignment.center,
-        content=ft.Card(
-            elevation=8,
-            content=ft.Container(content=ft.Column([
-                ft.Text("Configure piecewise utility", size=20, weight="bold"),
-                *pw_rows,
-                ft.Row([
-                    ft.ElevatedButton("Cancel", on_click=close_pw_panel),
-                    ft.ElevatedButton("Confirm", on_click=confirm_pw_panel),
-                ], alignment=ft.MainAxisAlignment.END)
-            ], tight=True, scroll="auto"), padding=15), width=1000
-        )
-    )
-
-    sched_fields = {day: ft.TextField(label=daydic[day].capitalize(), value=init_schedules.get(day, "")) for day in range(1, 8)}
-    sched_panel = ft.Column([ft.Text(dicts[current_lang]["assigned_schedule"])] + list(sched_fields.values()))
-    penalties_fields_fixed = {a: ft.TextField(label=a.name, value=str(init_penalties.get(a, ""))) for a in activities}
-    penalties_panel_fixed = ft.Column([ft.Text(dicts[current_lang]["penalties"])] + list(penalties_fields_fixed.values()))
-
-    var_min = ft.TextField(label=dicts[current_lang]["min_weekly_ts"], value=str(init_min_ts))
-    var_max = ft.TextField(label=dicts[current_lang]["max_weekly_ts"], value=str(init_max_ts))
-    util_tf = ft.TextField(label=dicts[current_lang]["utility"], value=str(init_util_cte))
-    var_adj_min = ft.TextField(label=dicts[current_lang]["min_adj"], value=str(init_min_adj))
-    var_adj_max = ft.TextField(label=dicts[current_lang]["max_adj"], value=str(init_max_adj))
-
-    def open_pw_panel():
-        pw_panel.visible = True
-        if confirm_btn_ref: confirm_btn_ref[0].disabled = True
-        if cancel_btn_ref: cancel_btn_ref[0].disabled = True
-        page.update()
-
-    pw_btn = ft.ElevatedButton(dicts[current_lang]["configure_pw_util"], on_click=lambda e: open_pw_panel())
-
-    win_fields = {day: ft.TextField(label=daydic[day].capitalize(), value=init_window.get(day, "")) for day in range(1, 8)}
-    window_panel = ft.Column([ft.Text(dicts[current_lang]["allowed_window"])] + list(win_fields.values()))
-    penalties_fields_var = {a: ft.TextField(label=a.name, value=str(init_penalties.get(a, ""))) for a in activities}
-    penalties_panel_var = ft.Column([ft.Text(dicts[current_lang]["penalties"])] + list(penalties_fields_var.values()))
-
-    fix_advanced_panel = ft.Column([penalties_panel_fixed], visible=False)
-    var_advanced_panel = ft.Column([var_adj_min, var_adj_max, pw_btn, window_panel, penalties_panel_var], visible=False)
-
-    def on_type_change(e):
-        is_fixed = (type_dd.value == "fixed")
-        sched_panel.visible = is_fixed
-        var_min.visible = not is_fixed
-        var_max.visible = not is_fixed
-        util_tf.visible = not is_fixed
-        fix_advanced_panel.visible = False
-        var_advanced_panel.visible = False
-        page.update()
-
-    type_dd = ft.Dropdown(
+    # --- 2) Build all form controls ---
+    type_dd      = ft.Dropdown(
         label=dicts[current_lang]["type"],
         options=[
             ft.dropdown.Option(dicts[current_lang]["fixed"], data="fixed"),
-            ft.dropdown.Option(dicts[current_lang]["variable"], data="variable"),
+            ft.dropdown.Option(dicts[current_lang]["variable"], data="variable")
         ],
-        value=init_type,
-        on_change=on_type_change
+        value=init_type
     )
-    name_tf = ft.TextField(label=dicts[current_lang]["name"], value=init_name)
-    adv_btn = ft.ElevatedButton(dicts[current_lang]["advanced_options"], on_click=lambda e: toggle_panel(fix_advanced_panel if type_dd.value == "fixed" else var_advanced_panel))
+    name_tf      = ft.TextField(label=dicts[current_lang]["name"], value=init_name)
+    sched_fields = {
+        d: ft.TextField(label=daydic[d].capitalize(), value=init_sched.get(d, ""))
+        for d in range(1,8)
+    }
+    var_min      = ft.TextField(label=dicts[current_lang]["min_weekly_ts"], value=str(init_min))
+    var_max      = ft.TextField(label=dicts[current_lang]["max_weekly_ts"], value=str(init_max))
+    util_tf      = ft.TextField(label=dicts[current_lang]["utility"], value=str(init_util_cte))
+    var_adj_min  = ft.TextField(label=dicts[current_lang]["min_adj"], value=str(init_adj_min))
+    var_adj_max  = ft.TextField(label=dicts[current_lang]["max_adj"], value=str(init_adj_max))
+    win_fields   = {
+        d: ft.TextField(label=daydic[d].capitalize(), value=init_win[d] if d in init_win else "")
+        for d in range(1,8)
+    }
+    penalties_fixed = {
+        a: ft.TextField(label=a.name, value=str(init_pen[a] if a in init_pen else ""))
+        for a in activities
+    }
+    penalties_var   = {
+        a: ft.TextField(label=a.name, value=str(init_pen[a] if a in init_pen else ""))
+        for a in activities
+    }
 
-    on_type_change(None)
+    # --- 3) Panels (initially hidden) ---
+    sched_panel = ft.Column(
+        [ft.Text(dicts[current_lang]["assigned_schedule"])] +
+        list(sched_fields.values()),
+        visible=False
+    )
+    fix_adv = ft.Column(
+        [ft.Text(dicts[current_lang]["penalties"])] +
+        list(penalties_fixed.values()),
+        visible=False
+    )
+    var_adv = ft.Column(
+        [
+            var_adj_min, var_adj_max,
+            ft.ElevatedButton(dicts[current_lang]["configure_pw_util"], on_click=lambda e: open_pw_panel()),
+            ft.Text(dicts[current_lang]["allowed_window"]),
+            *list(win_fields.values()),
+            ft.Text(dicts[current_lang]["penalties"]),
+            *list(penalties_var.values())
+        ],
+        visible=False
+    )
 
+    # --- 4) Piecewise panel (overlay) ---
+    field_width=100
+    slot_max = number_of_ts // 7
+
+    # Data structures to hold per-day rows
+    day_rows = {d: [] for d in range(1, 8)}
+    day_columns = {}  # will hold ft.Column for each day
+
+    def rebuild_day_column(day):
+        """Rebuild the ft.Column for a given day from its rows."""
+        col = ft.Column([ft.Text(daydic[day].capitalize(), weight=ft.FontWeight.BOLD)], spacing=10)
+        for idx, (from_tf, to_tf, util_tf) in enumerate(day_rows[day]):
+            col.controls.append(
+                ft.Row([from_tf, to_tf, util_tf], spacing=10)
+            )
+        return col
+
+    def on_to_change(day, row_idx):
+        def handler(e):
+            # parse the new "To" input
+            try:
+                v = int(e.control.value)
+            except:
+                v = slot_max
+            # clamp to (from + 1) … slot_max
+            from_val = int(day_rows[day][row_idx][0].value)
+            v = max(v, from_val + 1)
+            v = min(v, slot_max)
+            e.control.value = str(v)
+
+            # clear and remove any rows after this one
+            rows = day_rows[day]
+            for f_tf, t_tf, u_tf in rows[row_idx+1:]:
+                f_tf.value = ""
+                t_tf.value = str(slot_max)
+                u_tf.value = ""
+            del rows[row_idx+1:]
+
+            # if we’re below the maximum, append a new row
+            if v < slot_max:
+                new_from = v
+                f = ft.TextField(label="From", value=str(new_from), disabled=True, width=field_width)
+                t = ft.TextField(
+                    label="To",
+                    value=str(slot_max),
+                    on_change=on_to_change(day, len(rows)), width=field_width
+                )
+                u = ft.TextField(label="Utility", width=field_width)
+                rows.append((f, t, u))
+
+            # rebuild UI
+            day_columns[day].controls = rebuild_day_column(day).controls
+            page.update()
+        return handler
+
+
+    # Initialize one row per day
+    for d in range(1, 8):
+        f = ft.TextField(label="From", value="0", disabled=True, width=field_width)
+        t = ft.TextField(
+            label="To", 
+            value=str(slot_max),
+            on_change=on_to_change(d, 0), width=field_width
+        )
+        u = ft.TextField(label="Utility", width=field_width)
+        day_rows[d].append((f, t, u))
+        # build initial column
+        day_columns[d] = rebuild_day_column(d)
+
+    # Buttons
+    pw_cancel = ft.ElevatedButton(dicts[current_lang]["cancel"], on_click=lambda e: close_pw_panel())
+    def on_pw_confirm(e):
+        has_something = False
+        new_util = []
+        for d in range(1, 8):
+            rows = day_rows[d]
+            to_vals = []
+            util_vals = []
+            for from_tf, to_tf, util in rows:
+                # parse and skip empty utilities
+                try:
+                    t = int(to_tf.value)
+                    has_something = True
+                except:
+                    continue
+                try:
+                    u = float(util.value)
+                except:
+                    u = 0.0
+                to_vals.append(t)
+                util_vals.append(u)
+            new_util.append(dailyUtility(to_vals, util_vals))
+        page._form_inputs["utility"] = new_util
+        nonlocal util_tf
+        if has_something:
+            util_tf.disabled = True
+            util_tf.value = 0
+        close_pw_panel()
+
+    pw_confirm = ft.ElevatedButton(
+        dicts[current_lang]["confirm"],
+        on_click=on_pw_confirm
+    )
+
+    # Actual pw_panel
+    pw_panel = ft.Container(
+        visible=False,
+        content=ft.Card(
+            content=ft.Container(
+                ft.Column(
+                    [
+                        # arrange the seven day columns in a grid or list:
+                        *[day_columns[d] for d in range(1, 8)],
+                        ft.Row([pw_cancel, pw_confirm], alignment=ft.MainAxisAlignment.END)
+                    ],
+                    scroll="auto",
+                    spacing=20
+                ),
+                padding=20
+            ),
+            width=400
+        )
+    )
+
+    # --- 5) Collect *only* form controls to disable ---
+    form_controls = [
+        type_dd, name_tf,
+        *sched_fields.values(),
+        var_min, var_max, util_tf,
+        var_adj_min, var_adj_max,
+        *win_fields.values(),
+        *penalties_fixed.values(),
+        *penalties_var.values(),
+    ]
+
+    # --- 6) open/close functions for pw_panel ---
+    def open_pw_panel():
+        pw_panel.visible = True
+        for c in form_controls:
+            c.disabled = True
+        page.update()
+
+    def close_pw_panel():
+        pw_panel.visible = False
+        for c in form_controls:
+            c.disabled = False
+        page.update()
+
+
+    # --- 7) Advanced‐options toggle button ---
+    adv_btn = ft.ElevatedButton(
+        dicts[current_lang]["advanced_options"],
+        on_click=lambda e: (
+            fix_adv.__setattr__("visible", (type_dd.value == "fixed") & (not fix_adv.visible)),
+            var_adv.__setattr__("visible", (type_dd.value != "fixed") & (not var_adv.visible)),
+            page.update()
+        )
+    )
+
+    # --- 8) Type‐change logic to switch base panels ---
+    def on_type_change(e):
+        fixed = (type_dd.value == "fixed")
+        sched_panel.visible = fixed
+        fix_adv.visible    = False
+        var_min.visible    = not fixed
+        var_max.visible    = not fixed
+        util_tf.visible    = not fixed
+        var_adv.visible    = False
+        page.update()
+    type_dd.on_change = on_type_change
+    on_type_change(None)  # initialize
+
+    # --- 9) Assemble form_body + return with pw_panel overlay ---
     form_body = ft.Column([
-        type_dd, name_tf, sched_panel, var_min, var_max, util_tf,
-        fix_advanced_panel, var_advanced_panel, adv_btn,
+        ft.Container(height=5),
+        type_dd, name_tf,
+        sched_panel,
+        var_min, var_max, util_tf,
+        adv_btn,
+        fix_adv, var_adv
     ], scroll="auto", expand=True)
 
-    # Save form data into function attribute for confirm_add_edit()
+    # Save for confirm_add_edit
     page._form_inputs = {
         "type_dd": type_dd,
         "name_tf": name_tf,
@@ -401,21 +654,22 @@ def build_activity_form(page, act=None, confirm_btn_ref=None, cancel_btn_ref=Non
         "util_tf": util_tf,
         "var_adj_min": var_adj_min,
         "var_adj_max": var_adj_max,
-        "penalties_fields_var": penalties_fields_var,
-        "penalties_fields_fixed": penalties_fields_fixed,
+        "penalties_fixed": penalties_fixed,
+        "penalties_var": penalties_var,
         "win_fields": win_fields,
-        "utility": util
+        "utility": page._form_inputs["utility"] if page._form_inputs else [None]*7
     }
 
-    return ft.Stack([form_body, pw_panel])
+    return ft.Stack([form_body, pw_panel]), form_controls
+
 
 def confirm_add_edit(dlg: ft.AlertDialog, edit=False):
     page = dlg.page
     f = page._form_inputs
     name = f["name_tf"].value.strip()
     if f["type_dd"].value == "fixed":
-        assigned = parse_window(None, number_of_ts, f["sched_fields"])
-        penalties = {a: float(f["penalties_fields_fixed"][a].value) for a in f["penalties_fields_fixed"] if f["penalties_fields_fixed"][a].value.strip()}
+        assigned = parse_window(number_of_ts, f["sched_fields"])
+        penalties = {a: float(f["penalties_fixed"][a].value) for a in f["penalties_fixed"] if f["penalties_fixed"][a].value.strip()}
         new_act = fixedActivity(name, penalties, assigned)
     else:
         min_ts = int(f["var_min"].value)
@@ -423,10 +677,10 @@ def confirm_add_edit(dlg: ft.AlertDialog, edit=False):
         util_cte = float(f["util_tf"].value)
         min_adj = int(f["var_adj_min"].value)
         max_adj = int(f["var_adj_max"].value)
-        penalties = {a: float(f["penalties_fields_var"][a].value) for a in f["penalties_fields_var"] if f["penalties_fields_var"][a].value.strip()}
+        penalties = {a: float(f["penalties_var"][a].value) for a in f["penalties_var"] if f["penalties_var"][a].value.strip()}
         win = {d: f["win_fields"][d].value for d in f["win_fields"]}
-        if util_cte>0:
-            cteUtil = {day:dailyUtility([3],[util_cte,util_cte]) for day in range(1,8)} 
+        if util_cte!=0:
+            cteUtil = {day:dailyUtility([number_of_ts/7],[util_cte]) for day in range(1,8)} 
             new_act = variableActivity(name,cteUtil, min_ts, max_ts,win, min_adj, max_adj, penalties)
         else:
             new_act = variableActivity(name,f["utility"], min_ts, max_ts,win, min_adj, max_adj, penalties)
@@ -436,6 +690,7 @@ def confirm_add_edit(dlg: ft.AlertDialog, edit=False):
         activities[selected_index] = new_act
     else:
         activities.append(new_act)
+
 
     refresh_activities(page)
     page.close(dlg)
@@ -448,6 +703,9 @@ def toggle_panel(panel: ft.Control):
 
 
 
-
-if __name__ == "__main__":
-    ft.app(target=main)
+if __name__=="__main__":
+    while(True):
+        if(input("1. parse_window (hh:mm...)\n2. inverse parse window ([1,2,67...])\n")=="1"):
+            print(parse_window(input("parse_window:\n"),168))
+        else:
+            print(inverse_parse_window(literal_eval(input("inverse_parse_window:\n")),168))

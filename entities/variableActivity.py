@@ -1,7 +1,7 @@
 from entities.dailyUtility import dailyUtility
-from entities.activity import Activity
+from entities.activity import activity
 
-class variableActivity(Activity):
+class variableActivity(activity):
 
     def __init__(self, name:str, utility:dailyUtility, min_ts:int, max_ts:int, allowed_ts:list, min_adjacent_ts:int, max_adjacent_ts:int, penalty:dict):
         super().__init__(name, penalty)

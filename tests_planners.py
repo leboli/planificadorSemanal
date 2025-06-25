@@ -1,7 +1,7 @@
 from entities.fixedActivity import fixedActivity
 from entities.variableActivity import variableActivity
 from entities.dailyUtility import dailyUtility
-from entities.activity import Activity
+from entities.activity import activity
 from planner import planner
 
 from pyomo.opt import SolverFactory

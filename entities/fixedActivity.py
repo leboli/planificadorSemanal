@@ -1,6 +1,6 @@
-from entities.activity import Activity
+from entities.activity import activity
 
-class fixedActivity(Activity):
+class fixedActivity(activity):
 
     def __init__(self, name:str, assigned_ts:list, penalties:dict):
         super().__init__(name, penalties)
@@ -17,3 +17,6 @@ class fixedActivity(Activity):
     @assigned_ts.setter
     def assigned_ts(self, value:list):
         self.__assigned_ts = value
+
+    def __str__(self):
+        return self.name + " " + str(self.assigned_ts) + " " + str(self.penalties) 
