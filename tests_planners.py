@@ -10,18 +10,18 @@ from pyomo.environ import value
 
 if __name__ == "__main__":
 
+    # C:\Program Files (x86)\winglpk-4.65\glpk-4.65\w64
+
     fixed_activities = [
-        fixedActivity("Class", assigned_ts=[2, 3], penalties={})
+        fixedActivity("Class", assigned_ts=[t for t in range(48)], penalties={})
     ]
 
-    utility_example = dailyUtility(
-        segments=[2, 3, 2],
-        utilities_per_segment=[8, 5, 2]
-    )
+    utility_example = [dailyUtility(
+        segments=[2, 12, 24],
+        utilities_per_segment=[8, t, 2]
+    ) for t in range(7)]
 
-
-    variable_activities = [
-        variableActivity(
+    gymac = variableActivity(
             name="Gym",
             utility=utility_example,
             min_ts=2,
@@ -29,9 +29,9 @@ if __name__ == "__main__":
             allowed_ts=[0, 1, 4, 5, 6, 7],
             min_adjacent_ts=1,
             max_adjacent_ts=2,
-            penalty={"Reading": 3}
-        ),
-        variableActivity(
+            penalty={}
+        )
+    readac = variableActivity(
             name="Reading",
             utility=utility_example,
             min_ts=2,
@@ -39,19 +39,24 @@ if __name__ == "__main__":
             allowed_ts=[1, 4, 5, 6],
             min_adjacent_ts=1,
             max_adjacent_ts=2,
-            penalty={"Gym": 2}
+            penalty={gymac: 2}
         )
+
+    variable_activities = [
+        gymac,
+        readac
     ]
 
     plan = planner(fixed_activities, variable_activities, number_of_ts=168)
-    plan.buildModel()
+    model = plan.buildModel()
 
-    # Use GLPK solver (must be installed and accessible in PATH)
-    solver = SolverFactory('glpk')
-    result = solver.solve(plan.model, tee=True)
+    results = SolverFactory('glpk').solve(model)
+    results.write()
+    if results.solver.status == 'ok':
+        model.pprint()
 
     # Print some results
-    print("Objective value:", plan.model.obj())
-    for (a, t) in plan.model.x:
-        if value(plan.model.x[a, t]) > 0.5:
+    print("Objective value:", model.obj())
+    for (a, t) in model.x:
+        if value(model.x[a, t]) > 0.5:
             print(f"Activity {a} scheduled at time slot {t}")

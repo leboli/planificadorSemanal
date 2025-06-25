@@ -14,6 +14,7 @@ dicts = {
         "thirty_min": "30 minutes",
         "fifteen_min": "15 minutes",
         "activities": "Activities",
+        "activity":"activity",
         "add": "Add",
         "edit": "Edit",
         "solve": "SOLVE",
@@ -27,12 +28,16 @@ dicts = {
         "min_weekly_ts": "Min weekly time units",
         "max_weekly_ts": "Max weekly time units",
         "utility": "Utility (constant)",
+        "pw_utility": "Daily piecewise utility",
         "min_adj": "Min adjacent time units",
         "max_adj": "Max adjacent time units",
         "configure_pw_util": "Configure piecewise daily utility",
         "allowed_window": "Allowed window (as HH:MM-hh:mm,[HH:MM-hh:mm,...] in 24hr format)",
         "confirm": "Confirm",
         "cancel": "Cancel",
+        "from": "From",
+        "to": "To",
+        "piece_utility": "Utility"
     },
     "es": {
         "language": "Idioma",
@@ -41,6 +46,7 @@ dicts = {
         "thirty_min": "30 minutos",
         "fifteen_min": "15 minutos",
         "activities": "Actividades",
+        "activity":"activity",
         "add": "Agregar",
         "edit": "Editar",
         "solve": "RESOLVER",
@@ -54,12 +60,16 @@ dicts = {
         "min_weekly_ts": "Mín unidades de tiempo semanales",
         "max_weekly_ts": "Máx unidades de tiempo semanales",
         "utility": "Utilidad (constante)",
+        "pw_utility": "Utilidad diaria escalonada",
         "min_adj": "Mín unidades de tiempo adyacentes",
         "max_adj": "Máx unidades de tiempo adyacentes",
         "configure_pw_util": "Configurar utilidad diaria por partes",
         "allowed_window": "Ventana permitida (como HH:MM-hh:mm,[HH:MM-hh:mm,...] en formato 24hrs)",
         "confirm": "Confirmar",
         "cancel": "Cancelar",
+        "from": "Desde",
+        "to": "Hasta",
+        "piece_utility": "Utilidad"
     }
 }
 
@@ -96,7 +106,7 @@ if Test:
             for day in range(7)
         ],
         12, 36,
-        [2, 3, 4, 10, 11, 50],
+        [2, 3, 4, 10, 11, 12, 50],
         2, 8,
         {fac1: "2", fac2: "10"}
     )
@@ -147,7 +157,7 @@ def GUI(page: ft.Page):
         on_change=on_language_change,
         alignment=ft.alignment.top_right,
     )
-    tu_dd = ft.Dropdown(
+    tu_dd = ft.Row(ft.Dropdown(
         options=[
             ft.dropdown.Option(dicts[current_lang]["one_hour"]),
             ft.dropdown.Option(dicts[current_lang]["thirty_min"]),
@@ -156,7 +166,7 @@ def GUI(page: ft.Page):
         value=dicts[current_lang]["one_hour"],
         on_change=on_time_unit_change,
         alignment=ft.alignment.top_left,
-    )
+    ))
     top_row = ft.Row([tu_dd, ft.Container(expand=1), lang_dd], height=50)
 
     # --- Activities table ---------------------------------------------------
@@ -289,11 +299,12 @@ def select_activity(index: int, page: ft.Page):
 def build_activity_info(act):
     """Turn a fixedActivity or variableActivity into a list of Text controls."""
     info = []
-    info.append(ft.Text(f"Name: {act.name}", weight=ft.FontWeight.BOLD))
-    typ = "Fixed" if isinstance(act, fixedActivity) else "Variable"
-    info.append(ft.Text(f"Type: {typ}"))
+    info.append(ft.Text(f"{dicts[current_lang]['name']}: {act.name}", weight=ft.FontWeight.BOLD))
+    typ = dicts[current_lang]["fixed"] if isinstance(act, fixedActivity) else dicts[current_lang]["variable"] 
+    info.append(ft.Text(f"{dicts[current_lang]['type']}: {typ}"))
 
     def daydic_to_strarray(dic,minus_one=False):
+
         return [
             f"{daydic[d].capitalize()}: {dic[d-1] if minus_one else (dic[daydic[d].capitalize()] if daydic[d].capitalize() in dic else None)}"
             for d in range(1, 8)
@@ -309,10 +320,10 @@ def build_activity_info(act):
             ft.Text(f"Assigned schedule:\n{schedule_str}")
         )        
     else:
-        info.append(ft.Text(f"Min weekly: {act.min_ts}"))
-        info.append(ft.Text(f"Max weekly: {act.max_ts}"))
-        info.append(ft.Text(f"Min adjacent: {act.min_adjacent_ts}"))
-        info.append(ft.Text(f"Max adjacent: {act.max_adjacent_ts}"))
+        info.append(ft.Text(f"{dicts[current_lang]['min_weekly_ts']}: {act.min_ts}"))
+        info.append(ft.Text(f"{dicts[current_lang]['max_weekly_ts']}: {act.max_ts}"))
+        info.append(ft.Text(f"{dicts[current_lang]['min_adj']}: {act.min_adjacent_ts}"))
+        info.append(ft.Text(f"{dicts[current_lang]['min_adj']}: {act.max_adjacent_ts}"))
 
         allowed_str = "\n".join(
             daydic_to_strarray(
@@ -320,19 +331,19 @@ def build_activity_info(act):
             )
         )
         info.append(
-            ft.Text(f"Allowed window:\n{allowed_str}")
+            ft.Text(f"{dicts[current_lang]['allowed_window']}:\n{allowed_str}")
         )        
         utility_str = "\n".join(
             daydic_to_strarray(act.utility,minus_one=True)
         )
         info.append(
-            ft.Text(f"Utility:\n{utility_str}")
+            ft.Text(f"{dicts[current_lang]['pw_utility']}:\n{utility_str}")
         )        
 
     # Penalties
     if getattr(act, "penalties", None):
         penalties_str = "\n".join(f"{a.name}: {act.penalties[a]}" for a in act.penalties)
-        info.append(ft.Text(f"Penalties:\n{penalties_str}"))
+        info.append(ft.Text(f"{dicts[current_lang]['penalties']}:\n{penalties_str}"))
 
 
     return info
@@ -346,7 +357,7 @@ def open_add_dialog(e: ft.ControlEvent):
 
     dlg = ft.AlertDialog(
         modal=True,
-        title=ft.Text(f"{dicts[current_lang]['add']} Activity"),
+        title=ft.Text(f"{dicts[current_lang]['add']} {dicts[current_lang]['activity']}"),
         content=ft.Container(form_stack, width=600),
         actions=[
             ft.TextButton(dicts[current_lang]["cancel"], on_click=close_dialog),
@@ -366,7 +377,7 @@ def open_edit_dialog(e: ft.ControlEvent):
 
     dlg = ft.AlertDialog(
         modal=True,
-        title=ft.Text(f"{dicts[current_lang]['edit']} Activity"),
+        title=ft.Text(f"{dicts[current_lang]['edit']} {dicts[current_lang]['activity']}"),
         content=ft.Container(form_stack, width=600),
         actions=[
             ft.TextButton(dicts[current_lang]["cancel"], on_click=close_dialog),
@@ -568,13 +579,13 @@ def build_activity_form(page, act=None):
             # if we’re below the maximum, append a new row
             if v < slot_max:
                 new_from = v
-                f = ft.TextField(label="From", value=str(new_from), disabled=True, width=field_width)
+                f = ft.TextField(label=dicts[current_lang]["from"], value=str(new_from), disabled=True, width=field_width)
                 t = ft.TextField(
-                    label="To",
+                    label=dicts[current_lang]["to"],
                     value=str(slot_max),
                     on_change=on_to_change(day, len(rows)), width=field_width
                 )
-                u = ft.TextField(label="Utility", width=field_width)
+                u = ft.TextField(label={dicts[current_lang]['piece_utility']}, width=field_width)
                 rows.append((f, t, u))
 
             # rebuild UI
@@ -585,13 +596,13 @@ def build_activity_form(page, act=None):
 
     # Initialize one row per day
     for d in range(1, 8):
-        f = ft.TextField(label="From", value="0", disabled=True, width=field_width)
+        f = ft.TextField(label=dicts[current_lang]["from"], value="0", disabled=True, width=field_width)
         t = ft.TextField(
-            label="To", 
+            label=dicts[current_lang]["to"], 
             value=str(slot_max),
             on_change=on_to_change(d, 0), width=field_width
         )
-        u = ft.TextField(label="Utility", width=field_width)
+        u = ft.TextField(label=dicts[current_lang]["piece_utility"], width=field_width)
         day_rows[d].append((f, t, u))
         # build initial column
         day_columns[d] = rebuild_day_column(d)

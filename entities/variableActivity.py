@@ -3,7 +3,7 @@ from entities.activity import activity
 
 class variableActivity(activity):
 
-    def __init__(self, name:str, utility:dailyUtility, min_ts:int, max_ts:int, allowed_ts:list, min_adjacent_ts:int, max_adjacent_ts:int, penalty:dict):
+    def __init__(self, name:str, utility:list[dailyUtility], min_ts:int, max_ts:int, allowed_ts:list, min_adjacent_ts:int, max_adjacent_ts:int, penalty:dict):
         super().__init__(name, penalty)
         self.__utility = utility
 
