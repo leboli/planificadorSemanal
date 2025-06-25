@@ -96,7 +96,7 @@ if Test:
             for day in range(7)
         ],
         12, 36,
-        [2, 3, 4, 10, 11, 12, 50],
+        [2, 3, 4, 10, 11, 50],
         2, 8,
         {fac1: "2", fac2: "10"}
     )
@@ -294,12 +294,9 @@ def build_activity_info(act):
     info.append(ft.Text(f"Type: {typ}"))
 
     def daydic_to_strarray(dic,minus_one=False):
-        print("=================================================" \
-        +str(dic)+
-        "================================================")
         return [
             f"{daydic[d].capitalize()}: {dic[d-1] if minus_one else (dic[daydic[d].capitalize()] if daydic[d].capitalize() in dic else None)}"
-            for d in range(1, len(dic)+1)
+            for d in range(1, 8)
         ]
 
 
@@ -334,10 +331,8 @@ def build_activity_info(act):
 
     # Penalties
     if getattr(act, "penalties", None):
-        info.append(ft.Text("Penalties:\n"))
-        for a in act.penalties:
-            info.append(ft.Text(f"{(a.name+': '+act.penalties[a])}"))
-            info.append(ft.Text("\n"))
+        penalties_str = "\n".join(f"{a.name}: {act.penalties[a]}" for a in act.penalties)
+        info.append(ft.Text(f"Penalties:\n{penalties_str}"))
 
 
     return info
