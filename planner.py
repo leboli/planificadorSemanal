@@ -50,7 +50,16 @@ class planner():
         model.Htot = Var(model.A, domain=NonNegativeReals)
         model.weekly = Constraint(model.A, rule=lambda m,a: m.Htot[a]==sum(m.h[a,d] for d in m.D))
         # bounds
-        model.bounds = Constraint(model.A_V, rule=lambda m,a: next((act.min_ts, m.Htot[a], act.max_ts) for act in variableActivities if act.name==a))
+        def weekly_bounds_min(m,a):
+            act = next(act for act in variableActivities if act.name==a)
+            return m.Htot[a] >= act.min_ts
+        def weekly_bounds_max(m,a):
+            act = next(act for act in variableActivities if act.name==a)
+            return m.Htot[a] <= act.max_ts
+
+        model.weekly_min = Constraint(model.A_V, rule=weekly_bounds_min)
+        model.weekly_max = Constraint(model.A_V, rule=weekly_bounds_max)
+
 
         # piecewise segments
         segs=[];H={};U={}
@@ -71,7 +80,16 @@ class planner():
         def seg_bound(m,a,d,k): return m.h_seg[a,d,k]<=(m.H[a,d,k] - (m.H[a,d,k-1] if k>1 else 0))*m.y[a,d,k]
         model.seg_bound=Constraint(model.SEG,rule=seg_bound)
         model.seg_prec=Constraint(model.SEG,rule=lambda m,a,d,k: Constraint.Skip if k==1 else m.y[a,d,k]<=m.y[a,d,k-1])
-        model.seg_act=Constraint(model.SEG,rule=lambda m,a,d,k: Constraint.Skip if k==1 else sum(m.h_seg[a,d,m_] for m_ in range(1,k))>=m.H[a,d,k]*m.y[a,d,k])
+        def seg_act(m, a, d, k):
+            # Para k=1 no hay activación previa
+            if k == 1:
+                return Constraint.Skip
+            # k>1: el tramo k solo puede activarse si
+            #   sum_{m=1}^{k-1} h_seg[a,d,m] >= H[a,d,k-1] * y[a,d,k]
+            return sum(m.h_seg[a, d, m_] for m_ in range(1, k)) \
+                >= m.H[a, d, k-1] * m.y[a, d, k]
+
+        model.seg_act = Constraint(model.SEG, rule=seg_act)
 
         # block start p
         model.p=Var(model.A_V,model.T,domain=Binary)
@@ -89,8 +107,9 @@ class planner():
                 for k in range(Lmin):
                     if t+k in model.T: model.pcon.add(model.p[act.name,t]<=model.x[act.name,t+k])
                 # max contiguous
-                if t+Lmax in model.T:
-                    model.pcon.add(sum(model.x[act.name,t+k] for k in range(Lmax+1))<=Lmax)
+                if t + Lmax - 1 < N:  
+                    model.pcon.add(sum(model.x[act.name, t+k] for k in range(Lmax)) <= Lmax)
+
 
         # transitions s
         model.s=Var(model.A,model.A,RangeSet(0,N-2),domain=Binary)
@@ -105,17 +124,18 @@ class planner():
                         model.scon.add(model.s[a,b,t]<=model.x[b,t+1])
 
         # objective
-        def obj(m):
-            util=sum(m.u[a,d,k]*m.h_seg[a,d,k] for (a,d,k) in m.SEG)
-            pen=0
-            for act in fixedActivities+variableActivities:
-                for b in all_names:
-                    if act.name==b: continue
-                    val=act.penalties.get(b,0)
-                    for t in model.T:
-                        if t< N-1: pen+=val*m.s[act.name,b,t]
-            return util-pen
-        model.obj=Objective(rule=obj,sense=maximize)
+        def obj_rule(m):
+            util = sum(m.u[a,d,k] * m.h_seg[a,d,k] for (a,d,k) in m.SEG)
+            pen  = sum(
+                act.penalties.get(b,0) * m.s[act.name,b,t]
+                for act in fixedActivities + variableActivities
+                for b in m.A if b != act.name
+                for t in m.T if t < N-1
+            )
+            return util - pen
+
+        model.obj = Objective(rule=obj_rule, sense=maximize)
+
         return model                    
 
 
@@ -135,12 +155,12 @@ class planner():
             results.solver.termination_condition == TerminationCondition.optimal):
 
             # Provide the optimal solution
-            solution = [value(model.obj)] + [None]*self.number_of_ts
+            solution = ([value(model.obj)],[None]*self.number_of_ts)
 
             for (a,t) in model.x:
                 if value(model.x[a,t]) > 0.5:
-                    solution.pop(t)
-                    solution.insert(t,a)
+                    solution[1].pop(t-1)
+                    solution[1].insert(t-1,a)
 
             # Print model and solution
             print("\n=== Solution Summary ===")

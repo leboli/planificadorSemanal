@@ -1,4 +1,5 @@
 import flet as ft
+from math import floor
 from entities.fixedActivity import fixedActivity
 from entities.variableActivity import variableActivity
 from entities.dailyUtility import dailyUtility
@@ -14,6 +15,8 @@ dicts = {
         "thirty_min": "30 minutes",
         "fifteen_min": "15 minutes",
         "activities": "Activities",
+        "delete": "Delete",
+        "info":"Activity data",
         "activity":"activity",
         "add": "Add",
         "edit": "Edit",
@@ -22,7 +25,7 @@ dicts = {
         "fixed": "fixed",
         "variable": "variable",
         "name": "Name",
-        "assigned_schedule": "Assigned schedule (as HH:MM-hh:mm,[HH:MM-hh:mm,...] in 24hr format)",
+        "assigned_schedule": "Assigned schedule",
         "advanced_options": "Advanced options",
         "penalties": "Penalties",
         "min_weekly_ts": "Min weekly time units",
@@ -32,7 +35,8 @@ dicts = {
         "min_adj": "Min adjacent time units",
         "max_adj": "Max adjacent time units",
         "configure_pw_util": "Configure piecewise daily utility",
-        "allowed_window": "Allowed window (as HH:MM-hh:mm,[HH:MM-hh:mm,...] in 24hr format)",
+        "allowed_window": "Allowed window",
+        "hr_format_tooltip":"(as HH:MM-hh:mm,[HH:MM-hh:mm,...] in 24hr format)",
         "confirm": "Confirm",
         "cancel": "Cancel",
         "from": "From",
@@ -46,7 +50,9 @@ dicts = {
         "thirty_min": "30 minutos",
         "fifteen_min": "15 minutos",
         "activities": "Actividades",
+        "info": "Datos de actividad",
         "activity":"activity",
+        "delete": "Eliminar",
         "add": "Agregar",
         "edit": "Editar",
         "solve": "RESOLVER",
@@ -54,7 +60,7 @@ dicts = {
         "fixed": "fija",
         "variable": "variable",
         "name": "Nombre",
-        "assigned_schedule": "Horario asignado (como HH:MM-hh:mm,[HH:MM-hh:mm,...] en formato 24hrs)",
+        "assigned_schedule": "Horario asignado",
         "advanced_options": "Opciones avanzadas",
         "penalties": "Penalizaciones",
         "min_weekly_ts": "Mín unidades de tiempo semanales",
@@ -64,7 +70,8 @@ dicts = {
         "min_adj": "Mín unidades de tiempo adyacentes",
         "max_adj": "Máx unidades de tiempo adyacentes",
         "configure_pw_util": "Configurar utilidad diaria por partes",
-        "allowed_window": "Ventana permitida (como HH:MM-hh:mm,[HH:MM-hh:mm,...] en formato 24hrs)",
+        "allowed_window": "Ventana permitida",
+        "hr_format_tooltip":"(como HH:MM-hh:mm,[HH:MM-hh:mm,...] en formato 24hrs)",
         "confirm": "Confirmar",
         "cancel": "Cancelar",
         "from": "Desde",
@@ -73,15 +80,15 @@ dicts = {
     }
 }
 
+# solver
+pl = None
 
 # Global state
 current_lang = "en"
 number_of_ts = 168
 Test = True
 if Test:
-    fac1 = fixedActivity("fac1", [1, 24, 48], {})
-    fac2 = fixedActivity("fac2", list(range(1, 169)), {fac1: "5"})
-    fac3 = fixedActivity("fac3", [], {})
+    fac1 = fixedActivity("fac2", list(range(1, 169)),{})
     vac1 = variableActivity(
         "vac1",
         [dailyUtility([1, 24], [3, 6]) for _ in range(7)],
@@ -91,35 +98,7 @@ if Test:
         {}
     )
     vac2 = variableActivity(
-        "vac2",
-        [dailyUtility([], []) for _ in range(7)],
-        0, 0,
-        [],
-        0, 0,
-        {}
-    )
-    vac3 = variableActivity(
-        "vac3",
-        [
-            dailyUtility([10, 15, 20], [100, 50, 0]) if day < 3
-            else dailyUtility([5, 10], [20, 10])
-            for day in range(7)
-        ],
-        12, 36,
-        [2, 3, 4, 10, 11, 12, 50],
-        2, 8,
-        {fac1: "2", fac2: "10"}
-    )
-    vac4 = variableActivity(
-        "vac4_invalid",
-        [dailyUtility([], []) for _ in range(7)],
-        50, 10,
-        [1, 2, 3],
-        1, 2,
-        {}
-    )
-    vac5 = variableActivity(
-        "vac5_fragmented",
+        "vac_fragmented",
         [dailyUtility([5], [25]) for _ in range(7)],
         10, 10,
         [i for i in range(1, 169) if i % 10 == 0],
@@ -127,7 +106,8 @@ if Test:
         {}
     )
 
-activities: list = [fac1,fac2,fac3,vac1,vac2,vac3,vac4,vac5] if Test else []
+schedule_array = []
+activities: list = [fac1,vac1,vac2] if Test else []
 selected_index: int = -1
 daydic = {1:"mon", 2:"tue", 3:"wed", 4:"thu", 5:"fri", 6:"sat", 7:"sun"} if current_lang=="en" else {1:"lun", 2:"mar", 3:"mié", 4:"jue", 5:"vie", 6:"sáb", 7:"dom"}
 
@@ -137,12 +117,13 @@ tu_dd = None
 activities_table = None
 add_btn = None
 edit_btn = None
+delete_btn = None
 solve_btn = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 def GUI(page: ft.Page):
-    global lang_dd, tu_dd, activities_table, add_btn, edit_btn, solve_btn
+    global lang_dd, tu_dd, activities_table, add_btn, edit_btn, solve_btn, delete_btn
 
     page.title = "Scheduler"
     page.window_width = 1200
@@ -157,7 +138,7 @@ def GUI(page: ft.Page):
         on_change=on_language_change,
         alignment=ft.alignment.top_right,
     )
-    tu_dd = ft.Row(ft.Dropdown(
+    tu_dd = ft.Row([ft.Text(dicts[current_lang]["time_unit"]+":"),ft.Dropdown(
         options=[
             ft.dropdown.Option(dicts[current_lang]["one_hour"]),
             ft.dropdown.Option(dicts[current_lang]["thirty_min"]),
@@ -165,9 +146,26 @@ def GUI(page: ft.Page):
         ],
         value=dicts[current_lang]["one_hour"],
         on_change=on_time_unit_change,
-        alignment=ft.alignment.top_left,
-    ))
-    top_row = ft.Row([tu_dd, ft.Container(expand=1), lang_dd], height=50)
+        alignment=ft.alignment.top_left,)])
+    top_row = ft.Row(
+        [
+            tu_dd,
+            ft.Container(
+                expand=1,
+                content=ft.Row(
+                    [
+                        ft.Text("Week", size=80, color=ft.Colors.RED_400,   weight=ft.FontWeight.BOLD),
+                        ft.Text("LINQ", size=80, color=ft.Colors.LIGHT_GREEN_400, weight=ft.FontWeight.BOLD),
+                    ],
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    expand=True, 
+                )
+            ),
+            lang_dd,
+        ],
+        height=100,
+        vertical_alignment=ft.CrossAxisAlignment.END
+    )
 
     # --- Activities table ---------------------------------------------------
     activities_table = ft.DataTable(
@@ -182,11 +180,12 @@ def GUI(page: ft.Page):
 
     add_btn = ft.ElevatedButton(dicts[current_lang]["add"], on_click=open_add_dialog)
     edit_btn = ft.ElevatedButton(dicts[current_lang]["edit"], on_click=open_edit_dialog, disabled=True)
+    delete_btn = ft.ElevatedButton(dicts[current_lang]["delete"], on_click=delete_selected, disabled=True)
     solve_btn = ft.ElevatedButton(
         dicts[current_lang]["solve"],
-        on_click=lambda e: print("solving"),
-        bgcolor=ft.Colors.PINK_ACCENT_200,
-        expand=True
+        on_click=on_solve,
+        bgcolor=ft.Colors.LIGHT_GREEN_400,
+        expand=True, color=ft.Colors.LIGHT_GREEN_900
     )
 
     # --- Info panel (new!) --------------------------------------------------
@@ -197,7 +196,7 @@ def GUI(page: ft.Page):
         ft.Row([
         ft.Container(
             content=ft.Text(dicts[current_lang]["activities"],
-                            size=20, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.BOLD),
+                            size=25, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.BOLD),
             expand=True
         )]),
         ft.Row([ft.Container(
@@ -208,7 +207,7 @@ def GUI(page: ft.Page):
             border_radius=10, 
             expand=True,
         )]),
-        ft.Row([add_btn, edit_btn]),
+        ft.Row([add_btn, edit_btn, delete_btn]),
     ], expand=True)
 
     activities_panel = ft.Row([ft.Container(
@@ -216,28 +215,131 @@ def GUI(page: ft.Page):
         bgcolor=ft.Colors.GREY_900,
         padding=20,
         expand=True,
-        border_radius=10, border=ft.border.all(3, ft.Colors.INDIGO_700)
+        border_radius=10, border=ft.border.all(3, ft.Colors.RED_400)
     )])
 
-    right_panel = ft.Container(expand=1)
+    #---Scheduler-------------------------------------------------------------
+    hourows=[]
+    for r in range(24):
+        hourows.append(ft.DataRow([ft.DataCell(ft.Text(f"{r:02d}:00hrs-{(r):02d}:59hrs",size=12))]))
+    hour_table = ft.DataTable(
+        columns=[ft.DataColumn(ft.Text(" ",weight=ft.FontWeight.BOLD,size=16))],
+        rows=hourows,
+        data_row_min_height=1020/24,
+        data_row_max_height=1020/24,
+        show_checkbox_column=False,
+        expand=False
+    )
+
+    def build_schedule_panel(schedule_array):
+
+        # number_of_ts is a global
+        rows_per_col = number_of_ts // 7
+        # Column labels
+        days = [daydic[d].capitalize() for d in range(1, 8)]
+
+        # Build DataTable columns
+        cols = [ft.DataColumn(ft.Text(label,weight=ft.FontWeight.BOLD,size=16)) for label in days]
+
+        # Build DataRows
+        rows = []
+        for r in range(rows_per_col):
+            cells = []
+            for c in range(7):
+                idx = c * rows_per_col + r  # zero‐based into schedule_array
+                name = schedule_array[idx] if idx < len(schedule_array) else None
+                cells.append(ft.DataCell(ft.Text(name or "", size=10)))
+            rows.append(ft.DataRow(cells=cells))
+
+        table = ft.DataTable(
+            columns=cols,
+            rows=rows,
+            show_checkbox_column=False,
+            expand=True,
+            data_row_min_height=1020/rows_per_col,
+            data_row_max_height=1020/rows_per_col
+        )
+
+        panel = ft.Container(
+            content=ft.Row([hour_table,table]), expand=True,
+            height=1090,  
+            padding=10,
+            border=ft.border.all(3, ft.Colors.LIGHT_GREEN_400), border_radius=10
+        )
+        return panel
+    
+    page.build_schedule_panel = build_schedule_panel
+
+
+
+    page.schedule_container = ft.Container(
+        expand=1,
+        padding=0,
+        content=page.build_schedule_panel(schedule_array)
+    )
+    right_panel = page.schedule_container
 
     # --- Assemble page ------------------------------------------------------
     body = ft.Column([
         top_row,
         ft.Row([
-            ft.Column([activities_panel, 
+            ft.Container(ft.Column([activities_panel, 
                         ft.Row([ft.Container(content=solve_btn, expand=True)]),
-                        ft.Row([ft.Container(selected_info_panel, margin=ft.margin.only(top=10), padding=5,border=ft.border.all(1, ft.Colors.BLUE_200), border_radius=5,expand=True)])],
-                        width=400),
-            right_panel
-        ], expand=True),
+                        ft.Row([ft.Container(ft.Column([ft.Row([ft.Container(ft.Text(dicts[current_lang]["info"],size=20, text_align=ft.TextAlign.CENTER, weight=ft.FontWeight.BOLD),expand=True)]),selected_info_panel]), margin=ft.margin.only(top=10), padding=5,border=ft.border.all(1, ft.Colors.BLUE_200), border_radius=5,expand=True, height=496)])],
+                        width=400), expand=False, padding=15),
+            ft.Container(right_panel,expand=1,padding=15)
+        ], expand=True, vertical_alignment=ft.CrossAxisAlignment.START),
     ], expand=True)
 
     page.selected_info_panel = selected_info_panel
 
+    page.solve_overlay = ft.Container(
+        expand=True,
+        bgcolor=ft.Colors.with_opacity(0.5,ft.Colors.BLACK),
+        content=ft.Column(
+            [ft.Text("Solving...", size=30, color=ft.Colors.WHITE)],
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+        ),
+        visible=False,
+    )
+    page.overlay.append(page.solve_overlay)
+
     page.add(body)
 
 # ─────────────────────────────────────────────────────────────────────────────
+
+def on_solve(e: ft.ControlEvent):
+    global pl, schedule_array
+    # gather activities & create planner
+    fixedActs = [a for a in activities if isinstance(a, fixedActivity)]
+    varActs   = [a for a in activities if isinstance(a, variableActivity)]
+    pl = planner(fixedActs, varActs, number_of_ts)
+
+    page = e.page
+    # show overlay
+    page.solve_overlay.visible = True
+    page.update()
+
+    result = pl.solve()  # returns (utility, schedule_array) or None
+
+    # hide overlay
+    page.solve_overlay.visible = False
+
+    if result:
+        _, new_sched = result
+        schedule_array = new_sched
+        # rebuild right panel
+        page.schedule_container.content = page.build_schedule_panel(schedule_array)
+    else:
+        page.dialog = ft.AlertDialog(title=ft.Text("No solution found"))
+        page.dialog.open = True
+
+    page.update()
+
+
+
+
 def on_language_change(e: ft.ControlEvent):
     global current_lang
     global daydic
@@ -256,7 +358,14 @@ def on_time_unit_change(e: ft.ControlEvent):
         number_of_ts = 336
     else:
         number_of_ts = 672
-    e.page.update()
+
+    page = e.page
+    page.schedule_container.content = page.build_schedule_panel(schedule_array)
+
+    if pl:
+        on_solve() 
+
+    page.update()
 
 # ─────────────────────────────────────────────────────────────────────────────
 def refresh_activities(page):
@@ -278,9 +387,10 @@ def refresh_activities(page):
     page.update()
 
 def select_activity(index: int, page: ft.Page):
-    global selected_index, edit_btn
+    global selected_index, edit_btn, delete_btn
     selected_index = index
     edit_btn.disabled = False
+    delete_btn.disabled = False
 
     # toggle row highlighting
     for i, row in enumerate(activities_table.rows):
@@ -297,58 +407,96 @@ def select_activity(index: int, page: ft.Page):
 
 # ─────────────────────────────────────────────────────────────────────────────
 def build_activity_info(act):
-    """Turn a fixedActivity or variableActivity into a list of Text controls."""
-    info = []
-    info.append(ft.Text(f"{dicts[current_lang]['name']}: {act.name}", weight=ft.FontWeight.BOLD))
-    typ = dicts[current_lang]["fixed"] if isinstance(act, fixedActivity) else dicts[current_lang]["variable"] 
-    info.append(ft.Text(f"{dicts[current_lang]['type']}: {typ}"))
+    """Turn a fixedActivity or variableActivity into a list of Controls."""
+    info: list[ft.Control] = []
 
-    def daydic_to_strarray(dic,minus_one=False):
+    # Helper to generate day strings
+    def daydic_to_strarray(dic, minus_one=False):
+        lines = []
+        for d in range(1, 8):
+            day_label = daydic[d].capitalize()
+            if minus_one:
+                val = dic[d-1]
+            else:
+                val = dic.get(day_label, None) if isinstance(dic, dict) else None
+            lines.append(f"{day_label}: {val}")
+        return lines
 
-        return [
-            f"{daydic[d].capitalize()}: {dic[d-1] if minus_one else (dic[daydic[d].capitalize()] if daydic[d].capitalize() in dic else None)}"
-            for d in range(1, 8)
-        ]
+    # 1) Name row
+    info.append(
+        ft.Row([
+            ft.Text(f"{dicts[current_lang]['name']}:", weight=ft.FontWeight.BOLD),
+            ft.Text(act.name)
+        ], alignment=ft.MainAxisAlignment.START)
+    )
 
+    # 2) Type row
+    typ = dicts[current_lang]["fixed"] if isinstance(act, fixedActivity) else dicts[current_lang]["variable"]
+    info.append(
+        ft.Row([
+            ft.Text(f"{dicts[current_lang]['type']}:", weight=ft.FontWeight.BOLD),
+            ft.Text(typ)
+        ], alignment=ft.MainAxisAlignment.START)
+    )
 
+    # 3) Fixed vs Variable details
     if isinstance(act, fixedActivity):
         sched = inverse_parse_window(act.assigned_ts, number_of_ts)
-        schedule_str = "\n".join(
-            daydic_to_strarray(sched)
-        )
-        info.append(
-            ft.Text(f"Assigned schedule:\n{schedule_str}")
-        )        
+        lines = daydic_to_strarray(sched)
+        # header
+        info.append(ft.Text(f"{dicts[current_lang]['assigned_schedule']}:", weight=ft.FontWeight.BOLD))
+        # each day on its own line
+        for ln in lines:
+            info.append(ft.Text(ln))
     else:
-        info.append(ft.Text(f"{dicts[current_lang]['min_weekly_ts']}: {act.min_ts}"))
-        info.append(ft.Text(f"{dicts[current_lang]['max_weekly_ts']}: {act.max_ts}"))
-        info.append(ft.Text(f"{dicts[current_lang]['min_adj']}: {act.min_adjacent_ts}"))
-        info.append(ft.Text(f"{dicts[current_lang]['min_adj']}: {act.max_adjacent_ts}"))
-
-        allowed_str = "\n".join(
-            daydic_to_strarray(
-                inverse_parse_window(act.allowed_ts, number_of_ts)
+        # min / max weekly
+        for key, val in [
+            ("min_weekly_ts", act.min_ts),
+            ("max_weekly_ts", act.max_ts),
+            ("min_adj", act.min_adjacent_ts),
+            ("max_adj", act.max_adjacent_ts),
+        ]:
+            info.append(
+                ft.Row([
+                    ft.Text(f"{dicts[current_lang][key]}:", weight=ft.FontWeight.BOLD),
+                    ft.Text(str(val))
+                ], alignment=ft.MainAxisAlignment.START)
             )
-        )
-        info.append(
-            ft.Text(f"{dicts[current_lang]['allowed_window']}:\n{allowed_str}")
-        )        
-        utility_str = "\n".join(
-            daydic_to_strarray(act.utility,minus_one=True)
-        )
-        info.append(
-            ft.Text(f"{dicts[current_lang]['pw_utility']}:\n{utility_str}")
-        )        
 
-    # Penalties
+        # allowed window
+        allowed = inverse_parse_window(act.allowed_ts, number_of_ts)
+        lines = daydic_to_strarray(allowed)
+        info.append(ft.Text(f"{dicts[current_lang]['allowed_window']}:", weight=ft.FontWeight.BOLD))
+        for ln in lines:
+            info.append(ft.Text(ln))
+
+        # piecewise utility
+        util_lines = daydic_to_strarray(act.utility, minus_one=True)
+        info.append(ft.Text(f"{dicts[current_lang]['pw_utility']}:", weight=ft.FontWeight.BOLD))
+        for ln in util_lines:
+            info.append(ft.Text(ln))
+
+    # 4) Penalties (if any)
     if getattr(act, "penalties", None):
-        penalties_str = "\n".join(f"{a.name}: {act.penalties[a]}" for a in act.penalties)
-        info.append(ft.Text(f"{dicts[current_lang]['penalties']}:\n{penalties_str}"))
-
+        info.append(ft.Text(f"{dicts[current_lang]['penalties']}:", weight=ft.FontWeight.BOLD))
+        for other, pval in act.penalties.items():
+            info.append(ft.Text(f"{other.name}: {pval}"))
 
     return info
 
+
 # ─────────────────────────────────────────────────────────────────────────────
+def delete_selected(e: ft.ControlEvent):
+    global edit_btn, delete_btn, selected_index
+    activities.pop(selected_index)
+    edit_btn.disabled = True
+    delete_btn.disabled = True
+    refresh_activities(e.page)
+    e.page.selected_info_panel.controls.clear()
+    e.page.selected_info_panel.visible = False
+    selected_index = -1
+    # commit UI changes
+    e.page.update()
 
 
 def open_add_dialog(e: ft.ControlEvent):
@@ -415,6 +563,7 @@ def parse_window(num_slots, entries_dict):
                 s_idx = (day-1)*slots_per_day + s_min // slot_minutes
                 e_idx = (day-1)*slots_per_day + e_min // slot_minutes
                 idxs += list(range(s_idx, e_idx+1))
+        print(sorted(set(idxs)))
         return sorted(set(idxs))
 
 def inverse_parse_window(indices, num_slots):
@@ -517,7 +666,7 @@ def build_activity_form(page, act=None):
 
     # --- 3) Panels (initially hidden) ---
     sched_panel = ft.Column(
-        [ft.Text(dicts[current_lang]["assigned_schedule"])] +
+        [ft.Text(dicts[current_lang]["assigned_schedule"]), ft.Text(dicts[current_lang]["hr_format_tooltip"],size=10)] +
         list(sched_fields.values()),
         visible=False
     )
@@ -530,7 +679,7 @@ def build_activity_form(page, act=None):
         [
             var_adj_min, var_adj_max,
             ft.ElevatedButton(dicts[current_lang]["configure_pw_util"], on_click=lambda e: open_pw_panel()),
-            ft.Text(dicts[current_lang]["allowed_window"]),
+            ft.Text(dicts[current_lang]["allowed_window"]), ft.Text(dicts[current_lang]["hr_format_tooltip"],size=10),
             *list(win_fields.values()),
             ft.Text(dicts[current_lang]["penalties"]),
             *list(penalties_var.values())
@@ -776,12 +925,3 @@ def confirm_add_edit(dlg: ft.AlertDialog, edit=False):
 def toggle_panel(panel: ft.Control):
     panel.visible = not panel.visible
     panel.page.update()
-
-
-
-if __name__=="__main__":
-    while(True):
-        if(input("1. parse_window (hh:mm...)\n2. inverse parse window ([1,2,67...])\n")=="1"):
-            print(parse_window(input("parse_window:\n"),168))
-        else:
-            print(inverse_parse_window(literal_eval(input("inverse_parse_window:\n")),168))
