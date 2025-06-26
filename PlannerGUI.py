@@ -86,28 +86,33 @@ pl = None
 # Global state
 current_lang = "en"
 number_of_ts = 168
-Test = True
-if Test:
-    fac1 = fixedActivity("fac2", list(range(1, 169)),{})
+Test1 = True
+
+
+
+
+if Test1:
     vac1 = variableActivity(
-        "vac1",
-        [dailyUtility([1, 24], [3, 6]) for _ in range(7)],
-        5, 20,
+        "study",
+        [dailyUtility([3, 6, 24], [2, 6, 3]) for _ in range(7)],
+        10, 25,
         list(range(1, 169)),
-        1, 10,
+        2, 8,
         {}
     )
+    fac1 = fixedActivity("class", [t for t in range(number_of_ts) if t%(number_of_ts/7)>7 and t%(number_of_ts/7)<14],{vac1:10})
+    
     vac2 = variableActivity(
-        "vac_fragmented",
-        [dailyUtility([5], [25]) for _ in range(7)],
+        "gym",
+        [dailyUtility([1,3,24], [0,5,1]) for _ in range(5)]+[dailyUtility([24],[0]),dailyUtility([24],[0])],
         10, 10,
-        [i for i in range(1, 169) if i % 10 == 0],
-        1, 1,
+        [i for i in range(1, 169) if i % 10 < 6],
+        1, 4,
         {}
     )
 
 schedule_array = []
-activities: list = [fac1,vac1,vac2] if Test else []
+activities: list = [fac1,vac1,vac2] if Test1 else []
 selected_index: int = -1
 daydic = {1:"mon", 2:"tue", 3:"wed", 4:"thu", 5:"fri", 6:"sat", 7:"sun"} if current_lang=="en" else {1:"lun", 2:"mar", 3:"mié", 4:"jue", 5:"vie", 6:"sáb", 7:"dom"}
 
@@ -132,13 +137,13 @@ def GUI(page: ft.Page):
     page._form_inputs = {}
 
     # --- Top controls --------------------------------------------------------
-    lang_dd = ft.Dropdown(
+    lang_dd = ft.Container(ft.Dropdown(
         options=[ft.dropdown.Option("en"), ft.dropdown.Option("es")],
         value=current_lang,
         on_change=on_language_change,
-        alignment=ft.alignment.top_right,
-    )
-    tu_dd = ft.Row([ft.Text(dicts[current_lang]["time_unit"]+":"),ft.Dropdown(
+        alignment=ft.alignment.top_right, border_color=ft.Colors.LIGHT_GREEN_400, border_width=2
+    ), padding=15)
+    tu_dd = ft.Row([ft.Container(width=10),ft.Text(dicts[current_lang]["time_unit"]+":",weight=ft.FontWeight.BOLD),ft.Dropdown(
         options=[
             ft.dropdown.Option(dicts[current_lang]["one_hour"]),
             ft.dropdown.Option(dicts[current_lang]["thirty_min"]),
@@ -146,7 +151,7 @@ def GUI(page: ft.Page):
         ],
         value=dicts[current_lang]["one_hour"],
         on_change=on_time_unit_change,
-        alignment=ft.alignment.top_left,)])
+        alignment=ft.alignment.top_left, border_color=ft.Colors.LIGHT_GREEN_400, border_width=2)])
     top_row = ft.Row(
         [
             tu_dd,
@@ -295,12 +300,12 @@ def GUI(page: ft.Page):
 
     page.solve_overlay = ft.Container(
         expand=True,
-        bgcolor=ft.Colors.with_opacity(0.5,ft.Colors.BLACK),
-        content=ft.Column(
-            [ft.Text("Solving...", size=30, color=ft.Colors.WHITE)],
+        bgcolor=ft.Colors.with_opacity(0.85,ft.Colors.BLACK),
+        content=ft.Column([ft.Row(
+            [ft.Text("Solving...", size=40, color=ft.Colors.LIGHT_GREEN_800,weight=ft.FontWeight.BOLD)],
             alignment=ft.MainAxisAlignment.CENTER,
-            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-        ),
+            vertical_alignment=ft.CrossAxisAlignment.END, 
+    )]),
         visible=False,
     )
     page.overlay.append(page.solve_overlay)
