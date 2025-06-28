@@ -9,6 +9,9 @@ from ast import literal_eval
 # Translation dictionaries
 dicts = {
     "en": {
+        "percent": "Tolerance",
+        "opt": "(Optimal)",
+        "feas": "(Not great, but feasible)",
         "language": "Language",
         "time_unit": "Time unit/Time slot size",
         "one_hour": "1 hour",
@@ -44,6 +47,9 @@ dicts = {
         "piece_utility": "Utility"
     },
     "es": {
+        "percent": "Tolerancia",
+        "opt": "(Optima)",
+        "feas": "(No muy buena, pero factible)",
         "language": "Idioma",
         "time_unit": "Unidad de tiempo/Tamaño de ranura",
         "one_hour": "1 hora",
@@ -101,7 +107,6 @@ if Test1:
         {}
     )
     fac1 = fixedActivity("class", [t for t in range(number_of_ts) if t%(number_of_ts/7)>7 and t%(number_of_ts/7)<14],{vac1:10})
-    
     vac2 = variableActivity(
         "gym",
         [dailyUtility([1,3,24], [0,5,1]) for _ in range(5)]+[dailyUtility([24],[0]),dailyUtility([24],[0])],
@@ -110,9 +115,12 @@ if Test1:
         1, 4,
         {}
     )
+    fac2 = fixedActivity("sleep", [t for t in range(number_of_ts) if t%(number_of_ts/7)<=7 or t%(number_of_ts/7)>21],{vac2:10})
+
 
 schedule_array = []
-activities: list = [fac1,vac1,vac2] if Test1 else []
+satisfactory_percent = 0.05
+activities: list = [fac1,fac2,vac1,vac2] if Test1 else []
 selected_index: int = -1
 daydic = {1:"mon", 2:"tue", 3:"wed", 4:"thu", 5:"fri", 6:"sat", 7:"sun"} if current_lang=="en" else {1:"lun", 2:"mar", 3:"mié", 4:"jue", 5:"vie", 6:"sáb", 7:"dom"}
 
@@ -128,7 +136,8 @@ solve_btn = None
 
 # ─────────────────────────────────────────────────────────────────────────────
 def GUI(page: ft.Page):
-    global lang_dd, tu_dd, activities_table, add_btn, edit_btn, solve_btn, delete_btn
+    global lang_dd, tu_dd, activities_table, add_btn, edit_btn, solve_btn, delete_btn, satisfactory_percent, app_page
+    app_page = page
 
     page.title = "Scheduler"
     page.window_width = 1200
@@ -152,9 +161,24 @@ def GUI(page: ft.Page):
         value=dicts[current_lang]["one_hour"],
         on_change=on_time_unit_change,
         alignment=ft.alignment.top_left, border_color=ft.Colors.LIGHT_GREEN_400, border_width=2)])
+    p_dd = ft.Row([ft.Container(width=10),ft.Text(dicts[current_lang]["percent"]+":",weight=ft.FontWeight.BOLD),ft.Dropdown(
+        options=[
+            ft.dropdown.Option("0% "+ dicts[current_lang]["opt"]),
+            ft.dropdown.Option("5%"),
+            ft.dropdown.Option("10%"),
+            ft.dropdown.Option("15%"),
+            ft.dropdown.Option("20%"),
+            ft.dropdown.Option("25%"),
+            ft.dropdown.Option("35%"),            
+            ft.dropdown.Option("50%"),
+        ],
+        value="5%",
+        on_change=on_percent_change,
+        alignment=ft.alignment.top_left, border_color=ft.Colors.LIGHT_GREEN_400, border_width=2)])
+    
     top_row = ft.Row(
         [
-            tu_dd,
+            tu_dd, p_dd,
             ft.Container(
                 expand=1,
                 content=ft.Row(
@@ -314,19 +338,19 @@ def GUI(page: ft.Page):
 
 # ─────────────────────────────────────────────────────────────────────────────
 
-def on_solve(e: ft.ControlEvent):
-    global pl, schedule_array
+def on_solve(e: ft.ControlEvent = None):
+    global pl, schedule_array, satisfactory_percent, app_page
     # gather activities & create planner
     fixedActs = [a for a in activities if isinstance(a, fixedActivity)]
     varActs   = [a for a in activities if isinstance(a, variableActivity)]
     pl = planner(fixedActs, varActs, number_of_ts)
 
-    page = e.page
+    page = e.page if e is not None else app_page
     # show overlay
     page.solve_overlay.visible = True
     page.update()
 
-    result = pl.solve()  # returns (utility, schedule_array) or None
+    result = pl.solve(satisfactory_percent)  # returns (utility, schedule_array) or None
 
     # hide overlay
     page.solve_overlay.visible = False
@@ -356,14 +380,9 @@ def on_language_change(e: ft.ControlEvent):
 
 def on_time_unit_change(e: ft.ControlEvent):
     global number_of_ts
-    val = e.control.value
-    if val == dicts[current_lang]["one_hour"]:
-        number_of_ts = 168
-    elif val == dicts[current_lang]["thirty_min"]:
-        number_of_ts = 336
-    else:
-        number_of_ts = 672
-
+    val = 168 if e.control.value==dicts[current_lang]["one_hour"] else 336 if e.control.value==dicts[current_lang]["thirty_min"] else 672
+    activities_time_unit_change(number_of_ts,val)
+    number_of_ts = val
     page = e.page
     page.schedule_container.content = page.build_schedule_panel(schedule_array)
 
@@ -372,7 +391,67 @@ def on_time_unit_change(e: ft.ControlEvent):
 
     page.update()
 
+def on_percent_change(e: ft.ControlEvent):
+    global satisfactory_percent
+
+    txt = e.control.value.strip()
+    try:
+        val_int = int(txt.rstrip('%').split()[0])   # handles “0% opt” too
+    except ValueError:
+        val_int = 0
+    satisfactory_percent = val_int / 100.0
+
+
+    page = e.page
+    page.schedule_container.content = page.build_schedule_panel(schedule_array)
+
+    if pl:
+        on_solve(e)
+
+    page.update()    
+
 # ─────────────────────────────────────────────────────────────────────────────
+def activities_time_unit_change(old_slots: int, new_slots: int):
+    ratio = new_slots / old_slots
+
+    for act in activities:
+        # 1) Rescale the “window” or “assigned schedule” indices
+        if isinstance(act, fixedActivity):
+            # fixedActivity(name, penalties, assigned_ts)
+            old_idxs = act.assigned_ts
+            # each old index i covers new indices [i*ratio .. i*ratio+ratio-1]
+            new_idxs = {
+                j
+                for i in old_idxs
+                for j in range(int(i * ratio), int(i * ratio + ratio))
+            }
+            act.assigned_ts = sorted(new_idxs)
+        else:
+            # variableActivity(name, utility, min_ts, max_ts, allowed_ts, min_adjacent_ts, max_adjacent_ts, penalties)
+            old_allowed = act.allowed_ts
+            new_allowed = {
+                j
+                for i in old_allowed
+                for j in range(int(i * ratio), int(i * ratio + ratio))
+            }
+            act.allowed_ts = sorted(new_allowed)
+
+            # 2) Rescale all the simple time‐unit counts
+            act.min_ts           = int(act.min_ts * ratio)
+            act.max_ts           = int(act.max_ts * ratio)
+            act.min_adjacent_ts  = int(act.min_adjacent_ts * ratio)
+            act.max_adjacent_ts  = int(act.max_adjacent_ts * ratio)
+
+            # 3) Rescale each day’s piecewise‐utility segments
+            #    leave utilities_per_segment untouched
+            new_util = []
+            for du in act.utility:  # du is a dailyUtility
+                scaled_segments = [int(s * ratio) for s in du.segments]
+                # NB: utilities_per_segment stays the same length
+                new_util.append(dailyUtility(scaled_segments, du.utilities_per_segment))
+            act.utility = new_util    
+
+
 def refresh_activities(page):
     global activities_table
     activities_table.rows.clear()
@@ -506,42 +585,105 @@ def delete_selected(e: ft.ControlEvent):
 
 def open_add_dialog(e: ft.ControlEvent):
     page = e.page
+
+    # 1) Build the form (and get back the 'name_tf' inside controls)
     form_stack, controls = build_activity_form(page, None)
 
+    # 2) Create your Cancel and Confirm buttons, defaulting Confirm to disabled
+    cancel_btn = ft.TextButton(dicts[current_lang]["cancel"], on_click=close_dialog)
+    confirm_btn = ft.TextButton(
+        dicts[current_lang]["confirm"],
+        on_click=lambda ev: confirm_add_edit(dlg),
+        disabled=True    # start disabled
+    )
+
+    # 3) Build the dialog with those two actions
     dlg = ft.AlertDialog(
         modal=True,
         title=ft.Text(f"{dicts[current_lang]['add']} {dicts[current_lang]['activity']}"),
         content=ft.Container(form_stack, width=600),
-        actions=[
-            ft.TextButton(dicts[current_lang]["cancel"], on_click=close_dialog),
-            ft.TextButton(dicts[current_lang]["confirm"], on_click=lambda ev: confirm_add_edit(dlg)),
-        ]
+        actions=[cancel_btn, confirm_btn],
     )
-    # add dialog action buttons to controls list
+
+    # 4) Put those buttons into your `controls` list so build_activity_form
+    #    cleanup will still manage them
     controls.extend(dlg.actions)
 
+    # 5) Find the 'name' TextField in the controls (it’s the second item)
+    name_tf = controls[1]  # controls = [type_dd, name_tf, sched_fields…, penalties…, cancel_btn, confirm_btn]
+
+    # 6) Attach a live validator that toggles the Confirm button
+    def _sync_confirm_button(e):
+        text = e.control.value or ""
+        # if there's some non‑whitespace text, enable Confirm
+        confirm_btn.disabled = (text.strip() == "")
+        confirm_btn.update()
+        # also optionally show the error message
+        if confirm_btn.disabled:
+            e.control.error_text = "Name cannot be empty"
+        else:
+            e.control.error_text = None
+        e.control.update()
+
+    # Run it both on every keystroke and on blur
+    name_tf.on_change = _sync_confirm_button
+    name_tf.on_blur   = _sync_confirm_button
+
+    # 7) Finally show the dialog
     page.dialog = dlg
     page.open(dlg)
     page.update()
 
+
 def open_edit_dialog(e: ft.ControlEvent):
     page = e.page
+
+    # 1) Build form with the existing activity
     form_stack, controls = build_activity_form(page, activities[selected_index])
 
+    # 2) Create Cancel + Confirm buttons (Confirm starts enabled)
+    cancel_btn = ft.TextButton(
+        dicts[current_lang]["cancel"], 
+        on_click=close_dialog
+    )
+    confirm_btn = ft.TextButton(
+        dicts[current_lang]["confirm"],
+        on_click=lambda ev: confirm_add_edit(dlg, True),
+        disabled=False   # enabled by default
+    )
+
+    # 3) Construct the dialog
     dlg = ft.AlertDialog(
         modal=True,
         title=ft.Text(f"{dicts[current_lang]['edit']} {dicts[current_lang]['activity']}"),
         content=ft.Container(form_stack, width=600),
-        actions=[
-            ft.TextButton(dicts[current_lang]["cancel"], on_click=close_dialog),
-            ft.TextButton(dicts[current_lang]["confirm"], on_click=lambda ev: confirm_add_edit(dlg, True)),
-        ]
+        actions=[cancel_btn, confirm_btn],
     )
     controls.extend(dlg.actions)
 
+    # 4) Locate the name TextField in controls
+    #    build_activity_form always returns [type_dd, name_tf, ...], so:
+    name_tf = controls[1]
+
+    # 5) Attach the same sync handler
+    def _sync_confirm_button(e):
+        text = e.control.value or ""
+        # disable confirm if name is blank
+        confirm_btn.disabled = (text.strip() == "")
+        confirm_btn.update()
+        # show/clear inline error
+        e.control.error_text = "This field is required" if confirm_btn.disabled else None
+        e.control.update()
+
+    # wire it up
+    name_tf.on_change = _sync_confirm_button
+    name_tf.on_blur   = _sync_confirm_button
+
+    # 6) Show the dialog
     page.dialog = dlg
     page.open(dlg)
     page.update()
+
 
 
 def close_dialog(e: ft.ControlEvent):
@@ -625,17 +767,18 @@ def inverse_parse_window(indices, num_slots):
 
 def build_activity_form(page, act=None):
     # --- 1) Compute initial values ---
-    init_type    = "fixed" if not act or isinstance(act, fixedActivity) else "variable"
-    init_name    = act.name if act else ""
-    init_sched   = {} if not act or isinstance(act, variableActivity) else inverse_parse_window(act.assigned_ts, number_of_ts)
-    init_pen     = act.penalties.copy() if act else {}
-    init_min     = 0 if not act or isinstance(act, fixedActivity) else act.min_ts
-    init_max     = number_of_ts if not act or isinstance(act, fixedActivity) else act.max_ts
-    init_util_cte= act.util_cte if act and hasattr(act, "util_cte") else 0
-    init_adj_min = 1 if not act or isinstance(act, fixedActivity) else act.min_adjacent_ts
-    init_adj_max = number_of_ts if not act or isinstance(act, fixedActivity) else act.max_adjacent_ts
-    init_util    = act.utility if act and hasattr(act, "utility") else []
-    init_win     = inverse_parse_window(act.allowed_ts,number_of_ts) if act and hasattr(act, "allowed_ts") else {}
+    init_type     = "fixed" if not act or isinstance(act, fixedActivity) else "variable"
+    init_name     = act.name if act else ""
+    init_sched    = {} if not act or isinstance(act, variableActivity) else inverse_parse_window(act.assigned_ts, number_of_ts)
+    init_pen      = act.penalties.copy() if act else {}
+    init_min      = 0 if not act or isinstance(act, fixedActivity) else act.min_ts
+    init_max      = number_of_ts if not act or isinstance(act, fixedActivity) else act.max_ts
+    init_util_cte = act.util_cte if act and hasattr(act, "util_cte") else 0
+    init_adj_min  = 1 if not act or isinstance(act, fixedActivity) else act.min_adjacent_ts
+    init_adj_max  = number_of_ts if not act or isinstance(act, fixedActivity) else act.max_adjacent_ts
+    init_util     = act.utility if act and hasattr(act, "utility") else []           # list of dailyUtility
+    init_win      = inverse_parse_window(act.allowed_ts, number_of_ts) if act and hasattr(act, "allowed_ts") else {}
+
 
     # --- 2) Build all form controls ---
     type_dd      = ft.Dropdown(
@@ -646,32 +789,46 @@ def build_activity_form(page, act=None):
         ],
         value=init_type
     )
-    name_tf      = ft.TextField(label=dicts[current_lang]["name"], value=init_name)
+    def validate_not_empty(e: ft.ControlEvent):
+        tf = e.control
+        if not tf.value or not tf.value.strip():
+            tf.error_text = "This field is required"
+        else:
+            tf.error_text = None
+        tf.update()
+
+    name_tf      = ft.TextField(label=dicts[current_lang]["name"], value=init_name, on_blur=validate_not_empty)
+
+    # Assigned schedule fields for fixed activities
     sched_fields = {
-        d: ft.TextField(label=daydic[d].capitalize(), value=init_sched.get(d, ""))
+        d: ft.TextField(label=daydic[d].capitalize(), value=init_sched.get(daydic[d].capitalize(), ""))
         for d in range(1,8)
     }
+
     var_min      = ft.TextField(label=dicts[current_lang]["min_weekly_ts"], value=str(init_min))
     var_max      = ft.TextField(label=dicts[current_lang]["max_weekly_ts"], value=str(init_max))
     util_tf      = ft.TextField(label=dicts[current_lang]["utility"], value=str(init_util_cte))
     var_adj_min  = ft.TextField(label=dicts[current_lang]["min_adj"], value=str(init_adj_min))
     var_adj_max  = ft.TextField(label=dicts[current_lang]["max_adj"], value=str(init_adj_max))
+
+    # Allowed window fields for variable activities
     win_fields   = {
-        d: ft.TextField(label=daydic[d].capitalize(), value=init_win[d] if d in init_win else "")
+        d: ft.TextField(label=daydic[d].capitalize(), value=init_win.get(daydic[d].capitalize(), "00:00-23:59"))
         for d in range(1,8)
     }
+
     penalties_fixed = {
-        a: ft.TextField(label=a.name, value=str(init_pen[a] if a in init_pen else ""))
+        a: ft.TextField(label=a.name, value=str(init_pen.get(a, "")))
         for a in activities
     }
     penalties_var   = {
-        a: ft.TextField(label=a.name, value=str(init_pen[a] if a in init_pen else ""))
+        a: ft.TextField(label=a.name, value=str(init_pen.get(a, "")))
         for a in activities
     }
 
     # --- 3) Panels (initially hidden) ---
     sched_panel = ft.Column(
-        [ft.Text(dicts[current_lang]["assigned_schedule"]), ft.Text(dicts[current_lang]["hr_format_tooltip"],size=10)] +
+        [ft.Text(dicts[current_lang]["assigned_schedule"]), ft.Text(dicts[current_lang]["hr_format_tooltip"], size=10)] +
         list(sched_fields.values()),
         visible=False
     )
@@ -684,7 +841,7 @@ def build_activity_form(page, act=None):
         [
             var_adj_min, var_adj_max,
             ft.ElevatedButton(dicts[current_lang]["configure_pw_util"], on_click=lambda e: open_pw_panel()),
-            ft.Text(dicts[current_lang]["allowed_window"]), ft.Text(dicts[current_lang]["hr_format_tooltip"],size=10),
+            ft.Text(dicts[current_lang]["allowed_window"]), ft.Text(dicts[current_lang]["hr_format_tooltip"], size=10),
             *list(win_fields.values()),
             ft.Text(dicts[current_lang]["penalties"]),
             *list(penalties_var.values())
@@ -693,72 +850,70 @@ def build_activity_form(page, act=None):
     )
 
     # --- 4) Piecewise panel (overlay) ---
-    field_width=100
-    slot_max = number_of_ts // 7
+    field_width = 100
+    slot_max    = number_of_ts // 7
 
     # Data structures to hold per-day rows
-    day_rows = {d: [] for d in range(1, 8)}
-    day_columns = {}  # will hold ft.Column for each day
+    day_rows    = {d: [] for d in range(1, 8)}
+    day_columns = {}
 
     def rebuild_day_column(day):
-        """Rebuild the ft.Column for a given day from its rows."""
         col = ft.Column([ft.Text(daydic[day].capitalize(), weight=ft.FontWeight.BOLD)], spacing=10)
-        for idx, (from_tf, to_tf, util_tf) in enumerate(day_rows[day]):
-            col.controls.append(
-                ft.Row([from_tf, to_tf, util_tf], spacing=10)
-            )
+        for from_tf, to_tf, util_input in day_rows[day]:
+            col.controls.append(ft.Row([from_tf, to_tf, util_input], spacing=10))
         return col
 
     def on_to_change(day, row_idx):
         def handler(e):
-            # parse the new "To" input
             try:
                 v = int(e.control.value)
             except:
                 v = slot_max
-            # clamp to (from + 1) … slot_max
             from_val = int(day_rows[day][row_idx][0].value)
             v = max(v, from_val + 1)
             v = min(v, slot_max)
             e.control.value = str(v)
 
-            # clear and remove any rows after this one
-            rows = day_rows[day]
-            for f_tf, t_tf, u_tf in rows[row_idx+1:]:
-                f_tf.value = ""
-                t_tf.value = str(slot_max)
-                u_tf.value = ""
-            del rows[row_idx+1:]
+            # remove rows after current
+            for _ in day_rows[day][row_idx+1:]:
+                pass  # they will be overwritten
+            day_rows[day] = day_rows[day][:row_idx+1]
 
-            # if we’re below the maximum, append a new row
+            # add new row if needed
             if v < slot_max:
-                new_from = v
-                f = ft.TextField(label=dicts[current_lang]["from"], value=str(new_from), disabled=True, width=field_width)
-                t = ft.TextField(
-                    label=dicts[current_lang]["to"],
-                    value=str(slot_max),
-                    on_change=on_to_change(day, len(rows)), width=field_width
-                )
-                u = ft.TextField(label={dicts[current_lang]['piece_utility']}, width=field_width)
-                rows.append((f, t, u))
+                f = ft.TextField(label=dicts[current_lang]["from"], value=str(v), disabled=True, width=field_width)
+                t = ft.TextField(label=dicts[current_lang]["to"], value=str(slot_max), on_change=on_to_change(day, len(day_rows[day])), width=field_width)
+                u = ft.TextField(label=dicts[current_lang]["piece_utility"], width=field_width)
+                day_rows[day].append((f, t, u))
 
-            # rebuild UI
             day_columns[day].controls = rebuild_day_column(day).controls
             page.update()
         return handler
 
-
-    # Initialize one row per day
+    # --- Initialize piecewise rows with init_util if provided ---
     for d in range(1, 8):
-        f = ft.TextField(label=dicts[current_lang]["from"], value="0", disabled=True, width=field_width)
-        t = ft.TextField(
-            label=dicts[current_lang]["to"], 
-            value=str(slot_max),
-            on_change=on_to_change(d, 0), width=field_width
-        )
-        u = ft.TextField(label=dicts[current_lang]["piece_utility"], width=field_width)
-        day_rows[d].append((f, t, u))
-        # build initial column
+        if init_util and init_util[d-1].segments:
+            # load existing segments
+            segs = init_util[d-1].segments
+            utils = init_util[d-1].utilities_per_segment
+            for idx, end in enumerate(segs):
+                start = 0 if idx == 0 else segs[idx-1]
+                f = ft.TextField(label=dicts[current_lang]["from"], value=str(start), disabled=True, width=field_width)
+                t = ft.TextField(label=dicts[current_lang]["to"], value=str(end), on_blur=on_to_change(d, idx), width=field_width)
+                u = ft.TextField(label=dicts[current_lang]["piece_utility"], value=str(utils[idx]), width=field_width)
+                day_rows[d].append((f, t, u))
+            # if last segment end < slot_max, add empty row
+            if segs[-1] < slot_max:
+                f = ft.TextField(label=dicts[current_lang]["from"], value=str(segs[-1]), disabled=True, width=field_width)
+                t = ft.TextField(label=dicts[current_lang]["to"], value=str(slot_max), on_blur=on_to_change(d, len(day_rows[d])), width=field_width)
+                u = ft.TextField(label=dicts[current_lang]["piece_utility"], width=field_width)
+                day_rows[d].append((f, t, u))
+        else:
+            # default one full-slot row
+            f = ft.TextField(label=dicts[current_lang]["from"], value="0", disabled=True, width=field_width)
+            t = ft.TextField(label=dicts[current_lang]["to"], value=str(slot_max), on_blur=on_to_change(d, 0), width=field_width)
+            u = ft.TextField(label=dicts[current_lang]["piece_utility"], width=field_width)
+            day_rows[d].append((f, t, u))
         day_columns[d] = rebuild_day_column(d)
 
     # Buttons
@@ -900,7 +1055,7 @@ def confirm_add_edit(dlg: ft.AlertDialog, edit=False):
     if f["type_dd"].value == "fixed":
         assigned = parse_window(number_of_ts, f["sched_fields"])
         penalties = {a: float(f["penalties_fixed"][a].value) for a in f["penalties_fixed"] if f["penalties_fixed"][a].value.strip()}
-        new_act = fixedActivity(name, penalties, assigned)
+        new_act = fixedActivity(name, assigned, penalties)
     else:
         min_ts = int(f["var_min"].value)
         max_ts = int(f["var_max"].value)
@@ -909,8 +1064,8 @@ def confirm_add_edit(dlg: ft.AlertDialog, edit=False):
         max_adj = int(f["var_adj_max"].value)
         penalties = {a: float(f["penalties_var"][a].value) for a in f["penalties_var"] if f["penalties_var"][a].value.strip()}
         win = parse_window(number_of_ts,f["win_fields"])
-        if util_cte!=0:
-            cteUtil = {day:dailyUtility([number_of_ts/7],[util_cte]) for day in range(1,8)} 
+        if f["utility"]==[None]*7:
+            cteUtil = [dailyUtility([number_of_ts/7],[util_cte])]*7
             new_act = variableActivity(name,cteUtil, min_ts, max_ts,win, min_adj, max_adj, penalties)
         else:
             new_act = variableActivity(name,f["utility"], min_ts, max_ts,win, min_adj, max_adj, penalties)

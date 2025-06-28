@@ -1,4 +1,5 @@
 from pyomo.environ import *
+import os
 
 class planner():
     def __init__(self, fixed_activities, variable_activities, number_of_ts):
@@ -140,19 +141,22 @@ class planner():
 
 
 
-    def solve(self):
+    def solve(self, tolerance):
         print("Solving...")
-        glpsol_path = r"C:\Program Files (x86)\winglpk-4.65\glpk-4.65\w64\glpsol.exe"
+        glpsol_path = os.environ.get("GLPSOL_PATH", "glpsol")
         
         model = self.buildModel()
         # Select the solver
         solver = SolverFactory('glpk', executable=glpsol_path)
+        solver.options['mipgap'] = tolerance
         results = solver.solve(model, tee=True)
         results.write()
 
         # Check state and optimal condition
-        if (results.solver.status == 'ok' and
-            results.solver.termination_condition == TerminationCondition.optimal):
+        if ( results.solver.status == 'ok'
+            and results.solver.termination_condition
+                in (TerminationCondition.optimal,
+                    TerminationCondition.feasible) ):
 
             # Provide the optimal solution
             solution = ([value(model.obj)],[None]*self.number_of_ts)
